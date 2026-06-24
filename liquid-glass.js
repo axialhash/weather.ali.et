@@ -1,19 +1,20 @@
 /**
- * liquid-glass.js — Liquid glass refraction + cursor lens for weather.ali.et
+ * liquid-glass.js — Liquid glass refraction + fisheye cursor lens
  *
- * Based on the CodePen liquid glass technique:
- *  1. Generate displacement map via SDF on offscreen canvas
- *  2. Inject SVG feDisplacementMap filter with fresh ID (Safari cache-bust)
- *  3. Clone the AMOLED lattice canvas for refraction
- *  4. Apply CSS blur + tint + glint layers
+ * Liquid glass panels: SDF displacement map + SVG filter refraction.
+ * Cursor lens: REAL fisheye magnification (radial displacement outward from center)
+ *             + edge bevel refraction + CSS blur/tint/glint.
  *
- * Plus: cursor-following magnifying lens on desktop.
+ * The fisheye works by displacing each pixel OUTWARD from the lens center,
+ * proportional to its distance. This creates the magnifying glass effect:
+ * center content stays put, surrounding content gets pushed outward,
+ * making the center appear zoomed in.
  */
 
 (function () {
   "use strict";
 
-  // ── Glass config ────────────────────────────────────────────────
+  // ── Glass panel config ──────────────────────────────────────────
 
   var GLASS_CONFIG = {
     depth: 40,
@@ -31,17 +32,18 @@
   // ── Cursor lens config ──────────────────────────────────────────
 
   var LENS_CONFIG = {
-    size: 120,         // diameter
-    depth: 50,         // refraction strength
-    splay: 4,
-    feather: 16,
-    curve: 2.0,
-    blur: 0.5,
-    glint: 40,
+    size: 140,          // diameter
+    magnification: 2.0, // zoom factor (1.5 = 150% zoom)
+    depth: 60,          // refraction strength for edge bevel
+    splay: 3,
+    feather: 14,
+    curve: 1.5,
+    blur: 0.3,
+    glint: 35,
     tint: 0.02,
     tintColor: "#F3CA40",
-    radius: 60,        // circle
-    pad: 15,
+    radius: 70,         // circle
+    pad: 20,
   };
 
   var version = 0;
@@ -49,14 +51,14 @@
   var housing = null;
   var isMobile = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
 
-  // ── Displacement map builder ────────────────────────────────────
+  // ── Displacement map: edge bevel only (for glass panels) ────────
 
   function clamp255(v) {
     return v < 0 ? 0 : v > 255 ? 255 : v;
   }
 
-  function buildDisplacementMap(mw, mh, glassW, glassH, radius, rim, curve, feather) {
-    var key = mw + ":" + glassW + ":" + radius + ":" + rim + ":" + curve + ":" + feather;
+  function buildEdgeMap(mw, mh, glassW, glassH, radius, rim, curve, feather) {
+    var key = "edge:" + mw + ":" + glassW + ":" + radius + ":" + rim + ":" + curve + ":" + feather;
     var hit = mapCache.get(key);
     if (hit) return hit;
 
@@ -94,9 +96,107 @@
         amt = amt * amt * amt * (amt * (amt * 6 - 15) + 10);
         amt = Math.pow(amt, curve);
 
-        var i = (y * mw + x) * 4;
+        var i = (y * mh + x) * 4;
         px[i]     = clamp255(Math.round(127.5 - nx * amt * 127 * BOOST));
         px[i + 1] = clamp255(Math.round(127.5 - ny * amt * 127 * BOOST));
+        px[i + 2] = 128;
+        px[i + 3] = 255;
+      }
+    }
+
+    ctx.putImageData(img, 0, 0);
+    var url = cv.toDataURL("image/png");
+    if (mapCache.size > 50) mapCache.delete(mapCache.keys().next().value);
+    mapCache.set(key, url);
+    return url;
+  }
+
+  // ── Displacement map: fisheye + edge (for cursor lens) ──────────
+
+  function buildFisheyeMap(mw, mh, lensR, mag, edgeRim, edgeCurve, edgeFeather) {
+    var key = "fish:" + mw + ":" + lensR + ":" + mag + ":" + edgeRim;
+    var hit = mapCache.get(key);
+    if (hit) return hit;
+
+    var cv = document.createElement("canvas");
+    cv.width = mw;
+    cv.height = mh;
+    var ctx = cv.getContext("2d");
+    var img = ctx.createImageData(mw, mh);
+    var px = img.data;
+
+    var cx = mw / 2;
+    var cy = mh / 2;
+    var maxR = lensR; // radius where fisheye effect reaches full strength
+
+    // Edge bevel SDF
+    var hx = lensR;
+    var hy = lensR;
+    function edgeSdf(x, y) {
+      var qx = Math.abs(x - mw / 2) - (hx - lensR * 0.15);
+      var qy = Math.abs(y - mh / 2) - (hy - lensR * 0.15);
+      var ox = Math.max(qx, 0);
+      var oy = Math.max(qy, 0);
+      return Math.hypot(ox, oy) + Math.min(Math.max(qx, qy), 0) - lensR * 0.15;
+    }
+
+    for (var y = 0; y < mh; y++) {
+      for (var x = 0; x < mw; x++) {
+        var px_x = x + 0.5;
+        var px_y = y + 0.5;
+
+        // Distance from center (normalized 0-1 where 1 = edge)
+        var dx = px_x - cx;
+        var dy = px_y - cy;
+        var dist = Math.hypot(dx, dy);
+        var normDist = dist / maxR; // 0 at center, 1 at edge
+
+        // ── Fisheye displacement ──
+        // Push pixels OUTWARD from center. The displacement amount increases
+        // with distance, creating the magnifying glass effect.
+        // At center: no displacement. At edge: max displacement.
+        // The curve controls the magnification profile (barrel distortion).
+        var fisheyeAmt = 0;
+        if (normDist < 1.0 && dist > 0.1) {
+          // Barrel distortion: displace outward, stronger at edges
+          // mag 1.0 = no zoom, mag 2.0 = 2x zoom (stronger outward push)
+          var t = normDist;
+          // Smooth curve: starts slow, accelerates toward edge
+          fisheyeAmt = t * t * (mag - 1.0) * maxR * 0.4;
+          // Normalize direction
+          fisheyeAmt = fisheyeAmt / dist; // per-pixel displacement scale
+        }
+
+        // ── Edge bevel displacement ──
+        var es = edgeSdf(px_x, px_y);
+        var egx = edgeSdf(px_x + 1, px_y) - edgeSdf(px_x - 1, px_y);
+        var egy = edgeSdf(px_x, px_y + 1) - edgeSdf(px_x, px_y - 1);
+        var eLen = Math.hypot(egx, egy) || 1;
+        var enx = egx / eLen;
+        var eny = egy / eLen;
+        var edgeAmt = 0;
+        var edgeSpan = edgeRim + edgeFeather;
+        var eAmt = Math.max(0, 1 - Math.abs(es) / edgeSpan);
+        eAmt = eAmt * eAmt * eAmt * (eAmt * (eAmt * 6 - 15) + 10);
+        edgeAmt = Math.pow(eAmt, edgeCurve) * edgeRim;
+
+        // ── Combine: fisheye + edge bevel ──
+        // Fisheye pushes outward radially, edge bevel pushes along surface normal
+        var totalDx, totalDy;
+        if (dist > 0.1) {
+          var ndx = dx / dist;
+          var ndy = dy / dist;
+          totalDx = ndx * fisheyeAmt + enx * edgeAmt;
+          totalDy = ndy * fisheyeAmt + eny * edgeAmt;
+        } else {
+          totalDx = enx * edgeAmt;
+          totalDy = eny * edgeAmt;
+        }
+
+        // Encode: 127.5 = zero displacement, more = positive direction
+        var i = (y * mw + x) * 4;
+        px[i]     = clamp255(Math.round(127.5 + totalDx * 127));
+        px[i + 1] = clamp255(Math.round(127.5 + totalDy * 127));
         px[i + 2] = 128;
         px[i + 3] = 255;
       }
@@ -143,7 +243,7 @@
     var gw = Math.round(rect.width) + GLASS_CONFIG.pad * 2;
     var gh = Math.round(rect.height) + GLASS_CONFIG.pad * 2;
 
-    var mapUrl = buildDisplacementMap(
+    var mapUrl = buildEdgeMap(
       gw, gh,
       Math.round(rect.width),
       Math.round(rect.height),
@@ -184,7 +284,6 @@
     blurWrap.appendChild(cloneWrap);
 
     var tintLayer = document.createElement("div");
-    tintLayer.className = "glass-tint";
     tintLayer.style.cssText =
       "position:absolute; inset:0; border-radius:inherit; pointer-events:none;" +
       "background:" + GLASS_CONFIG.tintColor + ";" +
@@ -192,12 +291,10 @@
       "mix-blend-mode:multiply;";
 
     var glintLayer = document.createElement("div");
-    glintLayer.className = "glass-glint";
     glintLayer.style.cssText =
       "position:absolute; inset:0; border-radius:inherit; pointer-events:none;" +
       "box-shadow: inset 1.5px 1.5px 4px rgba(255,255,255," + (GLASS_CONFIG.glint / 100 * 0.7).toFixed(2) + ")," +
-      "inset -2px -2px 5px rgba(0,0,0,0.28);" +
-      "opacity:" + (GLASS_CONFIG.glint / 100).toFixed(2) + ";";
+      "inset -2px -2px 5px rgba(0,0,0,0.28);";
 
     var clipWrap = document.createElement("div");
     clipWrap.className = "glass-clip";
@@ -221,30 +318,31 @@
   var cursorLens = null;
   var cursorClone = null;
   var cursorCloneCtx = null;
-  var cursorFilterId = null;
-  var cursorX = -200;
-  var cursorY = -200;
-  var targetX = -200;
-  var targetY = -200;
+  var cursorX = -300;
+  var cursorY = -300;
+  var targetX = -300;
+  var targetY = -300;
   var lensVisible = false;
 
   function createCursorLens() {
-    if (isMobile) return; // no cursor on mobile
+    if (isMobile) return;
 
     var S = LENS_CONFIG.size;
     var P = LENS_CONFIG.pad;
     var mw = S + P * 2;
     var mh = S + P * 2;
+    var lensR = S / 2;
 
-    var mapUrl = buildDisplacementMap(
-      mw, mh, S, S,
-      LENS_CONFIG.radius,
+    // Build fisheye displacement map
+    var mapUrl = buildFisheyeMap(
+      mw, mh, lensR,
+      LENS_CONFIG.magnification,
       LENS_CONFIG.splay,
       LENS_CONFIG.curve,
       LENS_CONFIG.feather
     );
 
-    cursorFilterId = applyFilter(mapUrl, mw, mh, LENS_CONFIG.depth);
+    var filterId = applyFilter(mapUrl, mw, mh, LENS_CONFIG.depth);
 
     // Lens element
     cursorLens = document.createElement("div");
@@ -253,7 +351,8 @@
       "position:fixed; width:" + S + "px; height:" + S + "px;" +
       "border-radius:" + LENS_CONFIG.radius + "px; overflow:hidden;" +
       "pointer-events:none; z-index:50; isolation:isolate;" +
-      "box-shadow: 0 8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.1);" +
+      "box-shadow: 0 8px 32px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.06), " +
+      "inset 0 1px 0 rgba(255,255,255,0.08);" +
       "opacity:0; transition:opacity 0.3s ease;" +
       "will-change:transform; transform:translate(-50%,-50%);";
 
@@ -283,13 +382,13 @@
     }
     cursorClone.style.cssText =
       "width:100%; height:100%; object-fit:cover;" +
-      "filter:url(#" + cursorFilterId + ");" +
+      "filter:url(#" + filterId + ");" +
       "will-change:filter;";
     cursorCloneCtx = cursorClone.getContext("2d");
     refractionWrap.appendChild(cursorClone);
     blurW.appendChild(refractionWrap);
 
-    // Tint
+    // Tint — subtle gold
     var tint = document.createElement("div");
     tint.style.cssText =
       "position:absolute; inset:0; border-radius:inherit; pointer-events:none;" +
@@ -297,17 +396,24 @@
       "opacity:" + LENS_CONFIG.tint + ";" +
       "mix-blend-mode:multiply;";
 
-    // Glint — top-left specular highlight
+    // Glint — specular highlight (top-left light source)
     var glint = document.createElement("div");
     glint.style.cssText =
       "position:absolute; inset:0; border-radius:inherit; pointer-events:none;" +
-      "box-shadow: inset 2px 2px 6px rgba(255,255,255," + (LENS_CONFIG.glint / 100 * 0.8).toFixed(2) + ")," +
-      "inset -2px -2px 6px rgba(0,0,0,0.3);";
+      "box-shadow: inset 2px 2px 8px rgba(255,255,255," + (LENS_CONFIG.glint / 100 * 0.8).toFixed(2) + ")," +
+      "inset -2px -2px 6px rgba(0,0,0,0.35);";
+
+    // Outer ring glow
+    var ring = document.createElement("div");
+    ring.style.cssText =
+      "position:absolute; inset:-1px; border-radius:inherit; pointer-events:none;" +
+      "border: 1px solid rgba(255,255,255,0.08);";
 
     clip.appendChild(blurW);
     clip.appendChild(tint);
     clip.appendChild(glint);
     cursorLens.appendChild(clip);
+    cursorLens.appendChild(ring);
     document.body.appendChild(cursorLens);
 
     // Mouse tracking
@@ -332,7 +438,6 @@
     var latticeCanvas = document.getElementById("lattice");
     if (!latticeCanvas) return;
 
-    // Update panel clones
     var panels = document.querySelectorAll(".glass");
     for (var i = 0; i < panels.length; i++) {
       var p = panels[i];
@@ -341,7 +446,6 @@
       }
     }
 
-    // Update cursor lens clone
     if (cursorClone && cursorCloneCtx) {
       cursorCloneCtx.drawImage(latticeCanvas, 0, 0);
     }
@@ -350,13 +454,12 @@
   // ── Animation loop ──────────────────────────────────────────────
 
   var lastGlassUpdate = 0;
-  var GLASS_UPDATE_INTERVAL = 100; // ms
-  var LENS_SMOOTH = 0.12; // lerp factor
+  var GLASS_UPDATE_INTERVAL = 80;
+  var LENS_SMOOTH = 0.14;
 
   function glassLoop(time) {
     requestAnimationFrame(glassLoop);
 
-    // Smooth cursor follow
     if (cursorLens) {
       cursorX += (targetX - cursorX) * LENS_SMOOTH;
       cursorY += (targetY - cursorY) * LENS_SMOOTH;
@@ -364,7 +467,6 @@
       cursorLens.style.top = cursorY + "px";
     }
 
-    // Update glass clones at reduced rate
     if (time - lastGlassUpdate < GLASS_UPDATE_INTERVAL) return;
     lastGlassUpdate = time;
     updateGlassClones();
