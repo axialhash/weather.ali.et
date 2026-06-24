@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>weather.ali.et</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@200;300;400;600;700&family=JetBrains+Mono:wght@300;400&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+  <!-- AMOLED Lattice Background -->
+  <canvas id="lattice"></canvas>
+
+  <!-- Gradient overlay for readability -->
+  <div class="vignette"></div>
+
+  <!-- Main Content -->
+  <div class="app">
+
+    <!-- Header -->
+    <header class="header">
+      <div class="brand">
+        <span class="brand-icon">◈</span>
+        <span class="brand-text">weather.ali.et</span>
+      </div>
+      <div class="status" id="status">
+        <span class="status-dot"></span>
+        <span class="status-text">connecting...</span>
+      </div>
+    </header>
+
+    <!-- Hero: Current Readings -->
+    <section class="hero">
+      <div class="hero-main">
+        <div class="hero-temp" id="hero-temp">--</div>
+        <div class="hero-label">toilet server room</div>
+      </div>
+
+      <div class="hero-cards">
+        <div class="card">
+          <div class="card-icon">💧</div>
+          <div class="card-value" id="card-humidity">--</div>
+          <div class="card-label">humidity</div>
+        </div>
+        <div class="card">
+          <div class="card-icon">🔆</div>
+          <div class="card-value" id="card-light">--</div>
+          <div class="card-label">light</div>
+        </div>
+        <div class="card">
+          <div class="card-icon">🌡️</div>
+          <div class="card-value" id="card-feels">--</div>
+          <div class="card-label">dew point</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Stats Bar -->
+    <section class="stats-bar" id="stats-bar">
+      <div class="stat">
+        <span class="stat-label">24h high</span>
+        <span class="stat-value" id="stat-high">--</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">24h low</span>
+        <span class="stat-value" id="stat-low">--</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">24h avg</span>
+        <span class="stat-value" id="stat-avg">--</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">samples</span>
+        <span class="stat-value" id="stat-count">--</span>
+      </div>
+    </section>
+
+    <!-- Charts -->
+    <section class="charts">
+      <div class="chart-container">
+        <div class="chart-header">
+          <h3>temperature</h3>
+          <div class="chart-range">
+            <button class="range-btn active" data-hours="6">6h</button>
+            <button class="range-btn" data-hours="12">12h</button>
+            <button class="range-btn" data-hours="24">24h</button>
+          </div>
+        </div>
+        <canvas id="chart-temp"></canvas>
+      </div>
+
+      <div class="chart-container">
+        <div class="chart-header">
+          <h3>humidity & light</h3>
+        </div>
+        <canvas id="chart-humidity-light"></canvas>
+      </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+      <span> sensors in the toilet server room</span>
+      <span id="last-update">--</span>
+    </footer>
+
+  </div>
+
+  <script src="/static/lattice.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>
