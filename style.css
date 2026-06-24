@@ -391,9 +391,16 @@ html, body {
   .metrics {
     grid-template-columns: 1fr;
   }
-
   .stats-row {
     flex-wrap: wrap;
     gap: 1.2rem;
+  }
+
+  .chart-wrap {
+    height: 150px;
+  }
+
+  .hero-value {
+    font-size: clamp(4rem, 18vw, 7rem);
   }
 }

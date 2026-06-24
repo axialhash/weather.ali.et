@@ -1,30 +1,33 @@
 /**
- * app.js — weather.ali.et sensor dashboard.
- * Fetches live Arduino data, renders charts, handles offline gracefully.
+ * app.js — weather.ali.et sensor dashboard (optimized).
+ *
+ * Batches DOM reads/writes, throttles chart updates,
+ * handles offline gracefully.
  */
 
 (function () {
   "use strict";
 
-  // Auto-detect API location
+  // ── Config ──────────────────────────────────────
+
   var hostname = window.location.hostname;
   var API = (hostname === "axialhash.github.io" || hostname === "weather.ali.et")
-    ? "https://w.ali.et"
-    : "";
+    ? "https://w.ali.et" : "";
 
-  var OFFLINE_THRESHOLD_MS = 15000;
+  var STALE_MS = 15000;
   var lastDataTime = 0;
   var currentHours = 6;
   var chartTemp, chartHL;
 
-  // ── Chart.js defaults ───────────────────────────
+  // ── Chart.js defaults (minimal) ─────────────────
 
   Chart.defaults.color = "rgba(255,255,255,0.3)";
   Chart.defaults.borderColor = "rgba(255,255,255,0.05)";
   Chart.defaults.font.family = "'JetBrains Mono', monospace";
   Chart.defaults.font.size = 9;
+  Chart.defaults.animation = false; // kill all animations
 
-  // ── Elements ────────────────────────────────────
+  // ── Cache DOM refs ──────────────────────────────
 
   var $temp = document.getElementById("hero-temp");
   var $humidity = document.getElementById("val-humidity");
@@ -38,38 +41,61 @@
   var $count = document.getElementById("stat-count");
   var $footerTime = document.getElementById("footer-time");
 
-  // ── Offline banner ──────────────────────────────
+  // ── Offline banner (created once) ───────────────
 
   var banner = document.createElement("div");
   banner.className = "offline-banner";
-  banner.textContent = "api unreachable — retrying";
+  banner.textContent = "api unreachable \u2014 retrying";
   document.body.appendChild(banner);
 
+  var lastState = "connecting";
+
   function setStatus(state) {
+    if (state === lastState) return; // skip no-op
+    lastState = state;
     $status.className = "conn-status " + state;
-    if (state === "live") {
-      $statusLabel.textContent = "live";
-      banner.classList.remove("visible");
-    } else if (state === "stale") {
-      $statusLabel.textContent = "stale";
-      banner.classList.add("visible");
-    } else {
-      $statusLabel.textContent = "offline";
-      banner.classList.add("visible");
-    }
+    $statusLabel.textContent = state === "live" ? "live" : state === "stale" ? "stale" : "offline";
+    banner.classList.toggle("visible", state !== "live");
   }
 
   // ── Charts ──────────────────────────────────────
 
   function initCharts() {
+    var tooltipCfg = {
+      backgroundColor: "rgba(0,0,0,0.85)",
+      borderColor: "rgba(255,255,255,0.08)",
+      borderWidth: 1,
+      padding: 8,
+      cornerRadius: 4
+    };
+
     chartTemp = new Chart(document.getElementById("chart-temp"), {
       type: "line",
-      data: { labels: [], datasets: [{ label: "Temperature", data: [], borderColor: "#00ff88", backgroundColor: "rgba(0,255,136,0.06)", borderWidth: 1.5, pointRadius: 0, pointHoverRadius: 3, tension: 0.3, fill: true }] },
+      data: {
+        labels: [],
+        datasets: [{
+          data: [],
+          borderColor: "#00ff88",
+          backgroundColor: "rgba(0,255,136,0.06)",
+          borderWidth: 1.5,
+          pointRadius: 0,
+          tension: 0.3,
+          fill: true
+        }]
+      },
       options: {
-        responsive: true, maintainAspectRatio: false,
+        responsive: true,
+        maintainAspectRatio: false,
         interaction: { intersect: false, mode: "index" },
-        plugins: { legend: { display: false }, tooltip: { backgroundColor: "rgba(0,0,0,0.85)", borderColor: "rgba(255,255,255,0.08)", borderWidth: 1, padding: 8, cornerRadius: 4, titleFont: { size: 9 }, bodyFont: { size: 11 }, callbacks: { label: function (c) { return c.parsed.y.toFixed(1) + " C"; } } } },
-        scales: { x: { grid: { display: false }, ticks: { maxTicksLimit: 7, maxRotation: 0 } }, y: { grid: { color: "rgba(255,255,255,0.03)" }, ticks: { callback: function (v) { return v + "\u00B0"; } } } },
+        animation: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: tooltipCfg
+        },
+        scales: {
+          x: { grid: { display: false }, ticks: { maxTicksLimit: 6, maxRotation: 0 } },
+          y: { grid: { color: "rgba(255,255,255,0.03)" }, ticks: { callback: function (v) { return v + "\u00B0"; } } }
+        }
       }
     });
 
@@ -78,99 +104,123 @@
       data: {
         labels: [],
         datasets: [
-          { label: "Humidity", data: [], borderColor: "#4488ff", backgroundColor: "rgba(68,136,255,0.06)", borderWidth: 1.5, pointRadius: 0, pointHoverRadius: 3, tension: 0.3, fill: true, yAxisID: "y" },
-          { label: "Light", data: [], borderColor: "#ffaa33", backgroundColor: "rgba(255,170,51,0.06)", borderWidth: 1.5, pointRadius: 0, pointHoverRadius: 3, tension: 0.3, fill: true, yAxisID: "y1" }
+          { label: "Humidity", data: [], borderColor: "#4488ff", backgroundColor: "rgba(68,136,255,0.06)", borderWidth: 1.5, pointRadius: 0, tension: 0.3, fill: true, yAxisID: "y" },
+          { label: "Light", data: [], borderColor: "#ffaa33", backgroundColor: "rgba(255,170,51,0.06)", borderWidth: 1.5, pointRadius: 0, tension: 0.3, fill: true, yAxisID: "y1" }
         ]
       },
       options: {
-        responsive: true, maintainAspectRatio: false,
+        responsive: true,
+        maintainAspectRatio: false,
         interaction: { intersect: false, mode: "index" },
+        animation: false,
         plugins: {
-          legend: { display: true, position: "top", align: "end", labels: { boxWidth: 6, boxHeight: 6, usePointStyle: true, pointStyle: "circle", padding: 10, font: { size: 8 } } },
-          tooltip: { backgroundColor: "rgba(0,0,0,0.85)", borderColor: "rgba(255,255,255,0.08)", borderWidth: 1, padding: 8, cornerRadius: 4 }
+          legend: {
+            display: true, position: "top", align: "end",
+            labels: { boxWidth: 6, boxHeight: 6, usePointStyle: true, pointStyle: "circle", padding: 10, font: { size: 8 } }
+          },
+          tooltip: tooltipCfg
         },
         scales: {
-          x: { grid: { display: false }, ticks: { maxTicksLimit: 7, maxRotation: 0 } },
+          x: { grid: { display: false }, ticks: { maxTicksLimit: 6, maxRotation: 0 } },
           y: { position: "left", grid: { color: "rgba(255,255,255,0.03)" }, ticks: { callback: function (v) { return v + "%"; } }, min: 0, max: 100 },
           y1: { position: "right", grid: { display: false }, ticks: { callback: function (v) { return v + "%"; } }, min: 0, max: 100 }
-        },
+        }
       }
+    });
+  }
+
+  // ── Fetch with timeout ──────────────────────────
+
+  function fetchJSON(url, timeout) {
+    var ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+    var timer;
+    if (ctrl) {
+      timer = setTimeout(function () { ctrl.abort(); }, timeout || 8000);
+    }
+    return fetch(url, ctrl ? { signal: ctrl.signal } : undefined).then(function (res) {
+      if (!res.ok) throw new Error(res.status);
+      return res.json();
+    }).finally(function () {
+      if (ctrl) clearTimeout(timer);
     });
   }
 
   // ── Fetchers ────────────────────────────────────
 
   function fetchCurrent() {
-    return fetch(API + "/api/current").then(function (res) {
-      if (!res.ok) throw new Error(res.status);
-      return res.json();
-    }).then(function (data) {
+    return fetchJSON(API + "/api/current", 6000).then(function (data) {
       var r = data.reading;
       lastDataTime = Date.now();
 
-      if (data.serial_connected) {
-        setStatus("live");
-      } else {
-        setStatus("stale");
-      }
+      // Batch DOM writes
+      requestAnimationFrame(function () {
+        setStatus(data.serial_connected ? "live" : "stale");
 
-      if (r && r.temp != null) {
-        $temp.textContent = r.temp.toFixed(1);
-        $temp.classList.remove("stale");
-        $humidity.textContent = r.humidity != null ? r.humidity.toFixed(0) + "%" : "--";
-        $light.textContent = r.light != null ? r.light + "%" : "--";
-        if (r.temp != null && r.humidity != null) {
-          var dp = r.temp - ((100 - r.humidity) / 5);
-          $dew.textContent = dp.toFixed(1) + " C";
+        if (r && r.temp != null) {
+          $temp.textContent = r.temp.toFixed(1);
+          $temp.classList.remove("stale");
+          $humidity.textContent = r.humidity != null ? r.humidity.toFixed(0) + "%" : "--";
+          $light.textContent = r.light != null ? r.light + "%" : "--";
+          if (r.humidity != null) {
+            var dp = r.temp - ((100 - r.humidity) / 5);
+            $dew.textContent = dp.toFixed(1) + " C";
+          }
         }
-      }
+      });
     }).catch(function () {
-      if (Date.now() - lastDataTime > OFFLINE_THRESHOLD_MS) {
-        setStatus("offline");
-        $temp.classList.add("stale");
+      if (Date.now() - lastDataTime > STALE_MS) {
+        requestAnimationFrame(function () {
+          setStatus("offline");
+          $temp.classList.add("stale");
+        });
       }
     });
   }
 
   function fetchHistory() {
-    return fetch(API + "/api/history?hours=" + currentHours).then(function (res) {
-      if (!res.ok) throw new Error(res.status);
-      return res.json();
-    }).then(function (data) {
+    return fetchJSON(API + "/api/history?hours=" + currentHours, 10000).then(function (data) {
       var rows = data.readings;
       if (!rows || !rows.length) return;
 
-      var labels = rows.map(function (r) {
+      var labels = new Array(rows.length);
+      var temps = new Array(rows.length);
+      var hums = new Array(rows.length);
+      var lights = new Array(rows.length);
+
+      for (var i = 0; i < rows.length; i++) {
+        var r = rows[i];
         var d = new Date(r.timestamp * 1000);
-        return d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
-      });
+        labels[i] = d.getHours().toString().padStart(2, "0") + ":" + d.getMinutes().toString().padStart(2, "0");
+        temps[i] = r.temp;
+        hums[i] = r.humidity;
+        lights[i] = r.light;
+      }
 
       chartTemp.data.labels = labels;
-      chartTemp.data.datasets[0].data = rows.map(function (r) { return r.temp; });
+      chartTemp.data.datasets[0].data = temps;
       chartTemp.update("none");
 
       chartHL.data.labels = labels;
-      chartHL.data.datasets[0].data = rows.map(function (r) { return r.humidity; });
-      chartHL.data.datasets[1].data = rows.map(function (r) { return r.light; });
+      chartHL.data.datasets[0].data = hums;
+      chartHL.data.datasets[1].data = lights;
       chartHL.update("none");
     }).catch(function () {});
   }
 
   function fetchStats() {
-    return fetch(API + "/api/stats?hours=24").then(function (res) {
-      if (!res.ok) throw new Error(res.status);
-      return res.json();
-    }).then(function (s) {
+    return fetchJSON(API + "/api/stats?hours=24", 10000).then(function (s) {
       if (s.sample_count > 0) {
-        $high.textContent = s.temp_max.toFixed(1) + "\u00B0";
-        $low.textContent = s.temp_min.toFixed(1) + "\u00B0";
-        $avg.textContent = s.temp_avg.toFixed(1) + "\u00B0";
-        $count.textContent = s.sample_count.toLocaleString();
+        requestAnimationFrame(function () {
+          $high.textContent = s.temp_max.toFixed(1) + "\u00B0";
+          $low.textContent = s.temp_min.toFixed(1) + "\u00B0";
+          $avg.textContent = s.temp_avg.toFixed(1) + "\u00B0";
+          $count.textContent = s.sample_count.toLocaleString();
+        });
       }
     }).catch(function () {});
   }
 
-  // ── Range buttons ───────────────────────────────
+  // ── Range buttons (event delegation) ────────────
 
   document.getElementById("range-buttons").addEventListener("click", function (e) {
     var btn = e.target.closest(".range-btn");
@@ -181,12 +231,14 @@
     fetchHistory();
   });
 
-  // ── Clock ───────────────────────────────────────
+  // ── Clock (throttled to seconds) ────────────────
 
   function tickClock() {
-    $footerTime.textContent = new Date().toLocaleTimeString("en-US", {
-      hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false
-    }) + " EAT";
+    var now = new Date();
+    $footerTime.textContent =
+      now.getHours().toString().padStart(2, "0") + ":" +
+      now.getMinutes().toString().padStart(2, "0") + ":" +
+      now.getSeconds().toString().padStart(2, "0") + " EAT";
   }
 
   // ── Init ────────────────────────────────────────
@@ -197,13 +249,14 @@
   fetchStats();
   tickClock();
 
+  // Polling intervals
   setInterval(fetchCurrent, 5000);
   setInterval(function () { fetchHistory(); fetchStats(); }, 30000);
   setInterval(tickClock, 1000);
 
-  // Check staleness every 3s
+  // Staleness check
   setInterval(function () {
-    if (lastDataTime > 0 && Date.now() - lastDataTime > OFFLINE_THRESHOLD_MS) {
+    if (lastDataTime > 0 && Date.now() - lastDataTime > STALE_MS) {
       setStatus("offline");
       $temp.classList.add("stale");
     }

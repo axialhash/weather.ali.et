@@ -1,142 +1,182 @@
 /**
- * lattice.js — Diamond PenTile subpixel lattice background.
+ * lattice.js — Diamond PenTile subpixel lattice (optimized).
  *
- * Ported from alikhalidsherif/AMOLED diamond-pentile-geometry.js
- * Renders the actual AMOLED subpixel arrangement: green circles, red/blue diamonds.
+ * Performance targets:
+ *  - 60fps on mid-range laptop
+ *  - 30fps on mobile
+ *  - <5000 subpixels at 1080p
+ *  - Pre-computed vignette, no per-frame sqrt
  */
 
 (function () {
+  "use strict";
+
   var canvas = document.getElementById("lattice");
   if (!canvas) return;
   var ctx = canvas.getContext("2d", { alpha: false, desynchronized: true });
 
-  var viewportW = 1;
-  var viewportH = 1;
-  var dpr = 1;
-  var pitchX = 10;
-  var pitchY = 12;
-  var greenRadius = 0;
-  var diamondRadius = 0;
-  var subpixels = [];
+  // ── State ───────────────────────────────────────
 
+  var W = 1, H = 1, dpr = 1;
+  var subpixels = [];
+  var vignetteLUT = null; // pre-computed per-subpixel vignette
   var mouse = { x: -1, y: -1 };
+  var isMobile = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
+  var frameCount = 0;
+
+  // Lattice parameters — tuned for density vs perf
+  var PITCH_BASE = isMobile ? 14 : 10;   // bigger = fewer subpixels
+  var PITCH_RATIO = 1.15;
+
+  // ── Geometry ────────────────────────────────────
 
   function rebuild() {
-    dpr = Math.min(window.devicePixelRatio || 1, 2);
-    viewportW = Math.max(1, Math.floor(window.innerWidth));
-    viewportH = Math.max(1, Math.floor(window.innerHeight));
+    dpr = Math.min(window.devicePixelRatio || 1, isMobile ? 1.5 : 2);
+    W = window.innerWidth;
+    H = window.innerHeight;
 
-    canvas.width = Math.floor(viewportW * dpr);
-    canvas.height = Math.floor(viewportH * dpr);
-    canvas.style.width = viewportW + "px";
-    canvas.style.height = viewportH + "px";
+    canvas.width = Math.floor(W * dpr);
+    canvas.height = Math.floor(H * dpr);
+    canvas.style.width = W + "px";
+    canvas.style.height = H + "px";
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.imageSmoothingEnabled = false;
 
-    var scale = Math.max(2, Math.min(12, Math.sqrt((viewportW * viewportH) / 80000)));
-    pitchX = Math.max(2, Math.round(scale));
-    pitchY = Math.max(2, Math.round(pitchX * 1.15));
-
+    var pitchX = PITCH_BASE;
+    var pitchY = Math.round(pitchX * PITCH_RATIO);
     var baseR = Math.min(pitchX, pitchY) * 0.5;
-    var blackMatrix = baseR * 0.12;
-    greenRadius = Math.max(0.5, baseR * 0.8 - blackMatrix);
-    diamondRadius = Math.max(0.5, baseR * 0.9 - blackMatrix);
+    var trim = baseR * 0.12;
+    var greenR = Math.max(0.5, baseR * 0.8 - trim);
+    var diamondR = Math.max(0.5, baseR * 0.9 - trim);
 
-    var roughCols = Math.ceil(viewportW / pitchX) + 4;
-    var roughRows = Math.ceil(viewportH / pitchY) + 4;
+    var cols = Math.ceil(W / pitchX) + 4;
+    var rows = Math.ceil(H / pitchY) + 4;
     var draft = [];
 
-    for (var row = 0; row < roughRows; row++) {
-      var rowShiftX = (row & 1) * (pitchX * 0.5);
-      for (var col = 0; col < roughCols; col++) {
-        var cx = col * pitchX + rowShiftX;
+    for (var row = 0; row < rows; row++) {
+      var rowShift = (row & 1) * (pitchX * 0.5);
+      for (var col = 0; col < cols; col++) {
+        var cx = col * pitchX + rowShift;
         var cy = row * pitchY;
         var isGreen = ((row + col) & 1) === 0;
-        var type = "G";
+        var type = 0; // G=0, R=1, B=2
         if (!isGreen) {
-          var rbPhase = (Math.floor(col / 2) + row) & 1;
-          type = rbPhase === 0 ? "R" : "B";
+          type = ((Math.floor(col / 2) + row) & 1) === 0 ? 1 : 2;
         }
-        draft.push({ cx: cx, cy: cy, type: type, size: isGreen ? greenRadius : diamondRadius });
+        draft.push(cx, cy, type, isGreen ? greenR : diamondR);
       }
     }
 
-    var centerX = (draft[0].cx + draft[draft.length - 1].cx) * 0.5;
-    var centerY = (draft[0].cy + draft[draft.length - 1].cy) * 0.5;
-    var offX = viewportW * 0.5 - centerX;
-    var offY = viewportH * 0.5 - centerY;
-    var edgePad = Math.max(greenRadius, diamondRadius) + 2;
+    // Center and cull off-screen
+    var len = draft.length / 4;
+    var cx0 = draft[0], cy0 = draft[1];
+    var cx1 = draft[(len - 1) * 4], cy1 = draft[(len - 1) * 4 + 1];
+    var offX = (W - (cx0 + cx1)) * 0.5;
+    var offY = (H - (cy0 + cy1)) * 0.5;
+    var pad = Math.max(greenR, diamondR) + 2;
 
     subpixels = [];
-    for (var i = 0; i < draft.length; i++) {
-      var sp = draft[i];
-      var sx = sp.cx + offX;
-      var sy = sp.cy + offY;
-      if (sx < edgePad || sx > viewportW - edgePad || sy < edgePad || sy > viewportH - edgePad) continue;
-      subpixels.push({ cx: sx, cy: sy, type: sp.type, size: sp.size });
+    var edge = pad;
+    var maxDist = Math.sqrt(W * W + H * H) * 0.5;
+
+    for (var i = 0; i < len; i++) {
+      var base = i * 4;
+      var sx = draft[base] + offX;
+      var sy = draft[base + 1] + offY;
+      if (sx < edge || sx > W - edge || sy < edge || sy > H - edge) continue;
+
+      var dx = sx - W * 0.5;
+      var dy = sy - H * 0.5;
+      var dist = Math.sqrt(dx * dx + dy * dy);
+      var vig = Math.max(0, 1 - Math.pow(dist / maxDist, 1.5));
+
+      subpixels.push(sx, sy, draft[base + 2], draft[base + 3], vig);
     }
+
+    // Per-subpixel: [x, y, type, radius, vignette]
+    // stride = 5
   }
+
+  // ── Render ──────────────────────────────────────
 
   function draw(time) {
     ctx.fillStyle = "#000000";
-    ctx.fillRect(0, 0, viewportW, viewportH);
+    ctx.fillRect(0, 0, W, H);
 
-    var t = time / 4000;
-    var pulse = 0.35 + 0.08 * Math.sin(t);
+    var pulse = 0.32 + 0.06 * Math.sin(time / 4000);
     var mx = mouse.x;
     var my = mouse.y;
-    var mouseR = 180;
-    var count = subpixels.length;
+    var mouseR = isMobile ? 0 : 160; // disable mouse glow on mobile
 
-    for (var i = 0; i < count; i++) {
-      var s = subpixels[i];
-      var dx = s.cx - viewportW * 0.5;
-      var dy = s.cy - viewportH * 0.5;
-      var dist = Math.sqrt(dx * dx + dy * dy);
-      var maxDist = Math.sqrt(viewportW * viewportW + viewportH * viewportH) * 0.5;
-      var vignette = Math.max(0, 1 - Math.pow(dist / maxDist, 1.5));
+    var sp = subpixels;
+    var len = sp.length;
+    var stride = 5;
 
-      var mb = 0;
-      if (mx >= 0) {
-        var mdx = s.cx - mx;
-        var mdy = s.cy - my;
-        var mDist = Math.sqrt(mdx * mdx + mdy * mdy);
-        mb = Math.max(0, 1 - mDist / mouseR) * 0.35;
+    for (var i = 0; i < len; i += stride) {
+      var x = sp[i];
+      var y = sp[i + 1];
+      var type = sp[i + 2];
+      var radius = sp[i + 3];
+      var vig = sp[i + 4];
+
+      var b = pulse * vig;
+
+      // Mouse proximity (skip if <0.01 to save math)
+      if (mx >= 0 && mouseR > 0) {
+        var mdx = x - mx;
+        var mdy = y - my;
+        var mDist = mdx * mdx + mdy * mdy;
+        var mr2 = mouseR * mouseR;
+        if (mDist < mr2) {
+          b += (1 - mDist / mr2) * 0.3;
+        }
       }
 
-      var brightness = pulse * vignette + mb;
-      if (brightness < 0.015) continue;
+      if (b < 0.015) continue;
 
-      if (s.type === "G") {
-        var g = Math.round(180 * brightness);
-        ctx.fillStyle = "rgba(0," + g + ",0," + (brightness * 0.65).toFixed(3) + ")";
+      if (type === 0) {
+        // Green circle
+        var g = (180 * b) | 0;
+        ctx.fillStyle = "rgba(0," + g + ",0," + (b * 0.6).toFixed(3) + ")";
         ctx.beginPath();
-        ctx.arc(s.cx, s.cy, s.size + brightness * 0.4, 0, Math.PI * 2);
+        ctx.arc(x, y, radius + b * 0.3, 0, 6.2832);
         ctx.fill();
       } else {
-        var rb = (Math.floor(i / 2)) & 1;
-        var sz = s.size * (0.85 + brightness * 0.2);
-        var r = 0, b = 0;
-        if (s.type === "R") r = Math.round(200 * brightness);
-        else b = Math.round(220 * brightness);
-        var a = brightness * 0.55;
+        // Red or blue diamond
+        var rb = (i * 7) & 1;
+        var sz = radius * (0.85 + b * 0.2);
+        var r = 0, bl = 0;
+        if (type === 1) r = (200 * b) | 0;
+        else bl = (220 * b) | 0;
 
-        ctx.fillStyle = "rgba(" + r + ",0," + b + "," + a.toFixed(3) + ")";
+        ctx.fillStyle = "rgba(" + r + ",0," + bl + "," + (b * 0.5).toFixed(3) + ")";
         ctx.beginPath();
-        ctx.moveTo(s.cx, s.cy - sz);
-        ctx.lineTo(s.cx + sz, s.cy);
-        ctx.lineTo(s.cx, s.cy + sz);
-        ctx.lineTo(s.cx - sz, s.cy);
+        ctx.moveTo(x, y - sz);
+        ctx.lineTo(x + sz, y);
+        ctx.lineTo(x, y + sz);
+        ctx.lineTo(x - sz, y);
         ctx.closePath();
         ctx.fill();
       }
     }
   }
 
+  // ── RAF loop with adaptive throttle on mobile ───
+
+  var lastFrame = 0;
+  var mobileInterval = isMobile ? 33 : 0; // ~30fps on mobile
+
   function frame(time) {
-    draw(time);
     requestAnimationFrame(frame);
+
+    // Throttle on mobile
+    if (mobileInterval && time - lastFrame < mobileInterval) return;
+    lastFrame = time;
+
+    draw(time);
   }
+
+  // ── Events ──────────────────────────────────────
 
   document.addEventListener("mousemove", function (e) {
     mouse.x = e.clientX;
@@ -147,7 +187,17 @@
     mouse.y = -1;
   });
 
-  window.addEventListener("resize", rebuild);
+  var resizeTimer;
+  window.addEventListener("resize", function () {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(rebuild, 150);
+  });
+
+  // ── Init ────────────────────────────────────────
+
   rebuild();
   requestAnimationFrame(frame);
+
+  // Expose for debugging
+  window.__lattice = { subpixels: subpixels, rebuild: rebuild };
 })();
