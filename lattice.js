@@ -234,16 +234,27 @@
       bufCtx.arc(mx, my, moonR * 5, 0, 6.2832);
       bufCtx.fill();
 
-      bufCtx.fillStyle = "rgba(200,215,255," + (moonIntensity * 0.9).toFixed(2) + ")";
+      // Phase: 0=new, 0.25=1stQ, 0.5=full, 0.75=lastQ
+      // Clip to moon circle, draw lit portion
+      bufCtx.save();
       bufCtx.beginPath();
       bufCtx.arc(mx, my, moonR, 0, 6.2832);
-      bufCtx.fill();
-
-      var shadowW = moonR * Math.cos(moonPhase * Math.PI * 2) * 0.8;
-      bufCtx.fillStyle = "rgba(0,0,0," + (moonIntensity * 0.7).toFixed(2) + ")";
-      bufCtx.beginPath();
-      bufCtx.ellipse(mx + shadowW * 0.3, my, Math.abs(shadowW) + 1, moonR, 0, 0, 6.2832);
-      bufCtx.fill();
+      bufCtx.clip();
+      bufCtx.fillStyle = "rgba(200,215,255," + (moonIntensity * 0.9).toFixed(2) + ")";
+      if (moonPhase < 0.25) {
+        var litEdge = mx + moonR * (1 - moonPhase * 4);
+        bufCtx.fillRect(litEdge, my - moonR, mx + moonR - litEdge, moonR * 2);
+      } else if (moonPhase < 0.5) {
+        var darkEdge = mx + moonR * (1 - moonPhase * 4);
+        bufCtx.fillRect(darkEdge, my - moonR, mx + moonR - darkEdge, moonR * 2);
+      } else if (moonPhase < 0.75) {
+        var darkEdge = mx - moonR * (moonPhase * 4 - 2);
+        bufCtx.fillRect(mx - moonR, my - moonR, darkEdge - (mx - moonR), moonR * 2);
+      } else {
+        var litEdge = mx - moonR * (4 - moonPhase * 4);
+        bufCtx.fillRect(mx - moonR, my - moonR, litEdge - (mx - moonR), moonR * 2);
+      }
+      bufCtx.restore();
     }
 
     // ── Clouds ──
