@@ -1,8 +1,19 @@
 /**
- * lattice.js — Diamond PenTile AMOLED subpixel lattice.
+ * lattice.js — AMOLED Diamond PenTile lattice.
  *
- * Sun/moon positions are calculated dynamically from sunrise/sunset times
- * using the current clock — not cached backend values.
+ * The lattice IS the interface. No cards, no chrome.
+ * Weather scene (sun, moon, clouds, rain, snow, fog, lightning) in upper 60%.
+ * Sensor values (temp, humidity, light) rendered as text in lower 40%.
+ * Open-Meteo drives the weather simulation but isn't shown as text.
+ *
+ * Weather animation scaling:
+ *  - Cloud density scales with cloud_cover (0-100%)
+ *  - Rain particle count + speed scales with precipitation (mm)
+ *  - Rain angle tilts with wind_speed
+ *  - Snow particle count scales with precipitation
+ *  - Thunderstorm = rain + periodic lightning flash
+ *  - Fog = white haze overlay scaling with condition
+ *  - Wind drift scales with wind_speed
  */
 
 (function () {
@@ -16,52 +27,52 @@
   var subpixels = [];
   var isMobile = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
 
-  // Offscreen weather buffer
+  // Offscreen buffer
   var bufCanvas, bufCtx;
-  var BUF_W = 160;
-  var BUF_H = 100;
+  var BUF_W = 200;
+  var BUF_H = 120;
 
-  // Weather state — sun/moon are computed live from sunrise/sunset
+  // Sensor data (from Arduino via API)
+  var sensor = { temp: null, humidity: null, light: null };
+
+  // Weather simulation data (from Open-Meteo, used for visual only)
   var weather = {
     cloud_cover: 0,
     wind_speed: 0,
+    wind_direction: 0,
+    precipitation: 0,
     condition: "clear",
     temperature: 22,
     humidity: 50,
-    light: 50,
-    sunrise: null,   // Date object
-    sunset: null,     // Date object
+    sunrise: null,
+    sunset: null,
   };
 
   var raindrops = [];
+  var snowflakes = [];
   var cloudDrift = 0;
   var lastTime = 0;
+  var lightningTimer = 0;
 
   // Config
-  var PITCH = isMobile ? 8 : 5;
-  var BASE_BRIGHTNESS = 12;
-  var WEATHER_MULT = 1.6;
+  var PITCH = isMobile ? 9 : 6;
+  var BASE_BRIGHTNESS = 10;
+  var WEATHER_MULT = 1.8;
 
-  // ── Dynamic sun/moon calculation ────────────────────────────────
+  // ── Dynamic sun/moon ────────────────────────────────────────────
 
   function calcSunAltitude() {
     var sr = weather.sunrise;
     var ss = weather.sunset;
     if (!sr || !ss) return 0.5;
-
     var now = Date.now();
-    var srMs = sr.getTime();
-    var ssMs = ss.getTime();
-    var dl = ssMs - srMs;
+    var dl = ss.getTime() - sr.getTime();
     if (dl <= 0) return -0.3;
-
-    var elapsed = now - srMs;
-    var alt = Math.sin((elapsed / dl) * Math.PI);
-    return Math.max(-0.3, alt);
+    var elapsed = now - sr.getTime();
+    return Math.max(-0.3, Math.sin((elapsed / dl) * Math.PI));
   }
 
   function calcMoonPhase() {
-    // Known new moon: Jan 6 2000 18:14 UTC
     var knownNew = Date.UTC(2000, 0, 6, 18, 14, 0);
     var diff = (Date.now() - knownNew) / 86400000;
     return (diff % 29.53058867) / 29.53058867;
@@ -118,129 +129,155 @@
       var sx = draft[base] + offX;
       var sy = draft[base + 1] + offY;
       if (sx < pad || sx > W - pad || sy < pad || sy > H - pad) continue;
-
-      var normX = sx / W;
-      var normY = sy / H;
-
-      subpixels.push(sx, sy, draft[base + 2], draft[base + 3], normX, normY);
+      subpixels.push(sx, sy, draft[base + 2], draft[base + 3], sx / W, sy / H);
     }
   }
 
-  // ── Weather update ──────────────────────────────────────────────
+  // ── Update data ─────────────────────────────────────────────────
+
+  function updateSensor(data) {
+    if (!data) return;
+    if (data.temp != null) sensor.temp = data.temp;
+    if (data.humidity != null) sensor.humidity = data.humidity;
+    if (data.light != null) sensor.light = data.light;
+  }
 
   function updateWeather(data) {
     if (!data) return;
     if (data.cloud_cover != null) weather.cloud_cover = data.cloud_cover;
     if (data.wind_speed != null) weather.wind_speed = data.wind_speed;
+    if (data.wind_direction != null) weather.wind_direction = data.wind_direction;
+    if (data.precipitation != null) weather.precipitation = data.precipitation;
     if (data.condition) weather.condition = data.condition;
     if (data.temperature != null) weather.temperature = data.temperature;
     if (data.humidity != null) weather.humidity = data.humidity;
-    if (data.light != null) weather.light = data.light;
-
-    // Parse sunrise/sunset ISO strings into Date objects
     if (data.sunrise) {
       var sr = data.sunrise;
-      if (typeof sr === "string") {
-        weather.sunrise = new Date(sr.includes("T") ? sr : sr + "T06:00");
-      } else if (sr instanceof Date) {
-        weather.sunrise = sr;
-      }
+      if (typeof sr === "string") weather.sunrise = new Date(sr.includes("T") ? sr : sr + "T06:00");
     }
     if (data.sunset) {
       var ss = data.sunset;
-      if (typeof ss === "string") {
-        weather.sunset = new Date(ss.includes("T") ? ss : ss + "T18:00");
-      } else if (ss instanceof Date) {
-        weather.sunset = ss;
-      }
-    }
-
-    // Rain particles
-    var cond = weather.condition;
-    if (cond === "rain" || cond === "drizzle" || cond === "rain_showers") {
-      var target = cond === "drizzle" ? 20 : 40;
-      while (raindrops.length < target) {
-        raindrops.push(Math.random() * BUF_W, Math.random() * BUF_H, 0.4 + Math.random() * 0.8);
-      }
-      while (raindrops.length > target * 3) raindrops.pop();
-    } else {
-      raindrops.length = 0;
+      if (typeof ss === "string") weather.sunset = new Date(ss.includes("T") ? ss : ss + "T18:00");
     }
   }
 
-  // ── Draw weather into tiny buffer ───────────────────────────────
+  // ── Manage particles based on actual data ───────────────────────
 
-  function drawBuffer(time) {
-    if (!bufCanvas) {
-      bufCanvas = document.createElement("canvas");
-      bufCanvas.width = BUF_W;
-      bufCanvas.height = BUF_H;
-      bufCtx = bufCanvas.getContext("2d");
+  function manageParticles() {
+    var cond = weather.condition;
+    var precip = weather.precipitation;
+    var wind = weather.wind_speed;
+    var isRaining = cond === "rain" || cond === "drizzle" || cond === "rain_showers" || precip > 0.1;
+    var isSnowing = cond === "snow" || cond === "snow_showers";
+    var isStorm = cond === "thunderstorm";
+
+    // Rain: scale count with precipitation amount
+    if (isRaining || isStorm) {
+      // Base: 20 particles for drizzle, up to 80 for heavy rain
+      var rainTarget = Math.round(20 + precip * 15);
+      if (isStorm) rainTarget = Math.max(rainTarget, 60);
+      rainTarget = Math.min(rainTarget, 100);
+
+      while (raindrops.length < rainTarget) {
+        raindrops.push(
+          Math.random() * BUF_W,
+          Math.random() * BUF_H * 0.6,
+          0.3 + Math.random() * 0.7
+        );
+      }
+      while (raindrops.length > rainTarget * 1.5) raindrops.pop();
+    } else {
+      raindrops.length = 0;
     }
 
-    bufCtx.fillStyle = "#000";
-    bufCtx.fillRect(0, 0, BUF_W, BUF_H);
+    // Snow: scale count with precipitation
+    if (isSnowing) {
+      var snowTarget = Math.round(15 + precip * 10);
+      snowTarget = Math.min(snowTarget, 60);
 
-    // Calculate sun/moon from current time
+      while (snowflakes.length < snowTarget) {
+        snowflakes.push(
+          Math.random() * BUF_W,
+          Math.random() * BUF_H * 0.6,
+          0.2 + Math.random() * 0.4
+        );
+      }
+      while (snowflakes.length > snowTarget * 1.5) snowflakes.pop();
+    } else {
+      snowflakes.length = 0;
+    }
+  }
+
+  // ── Draw weather scene (upper 60% of buffer) ────────────────────
+
+  function drawWeatherScene(time) {
     var sunAlt = calcSunAltitude();
     var moonPhase = calcMoonPhase();
-    var windDrift = (weather.wind_speed / 10) * 0.3;
+    var wind = weather.wind_speed;
+    var cloudCover = weather.cloud_cover;
+    var precip = weather.precipitation;
+    var cond = weather.condition;
+    var sceneH = BUF_H * 0.6;
 
-    // Background color wash based on temperature
-    var tempNorm = Math.max(0, Math.min(1, (weather.temperature - 10) / 30));
-    var bgR = Math.round(tempNorm * 15);
-    var bgB = Math.round((1 - tempNorm) * 15);
-    bufCtx.fillStyle = "rgb(" + bgR + ",2," + bgB + ")";
-    bufCtx.fillRect(0, 0, BUF_W, BUF_H);
+    // Wind drift factor
+    var windDrift = (wind / 10) * 0.4;
+    // Rain angle from wind (radians)
+    var rainAngle = Math.min(wind / 30, 0.8);
+
+    // Temperature color wash
+    var tempNorm = Math.max(0, Math.min(1, (weather.temperature - 5) / 35));
+    var bgR = Math.round(tempNorm * 10);
+    var bgB = Math.round((1 - tempNorm) * 10);
+    bufCtx.fillStyle = "rgb(" + bgR + ",1," + bgB + ")";
+    bufCtx.fillRect(0, 0, BUF_W, sceneH);
 
     // ── Sun ──
     if (sunAlt > 0.01) {
-      // Sun arcs across the top of the buffer
-      // sunAlt goes 0→1→0 during the day (sunrise→noon→sunset)
-      var sx = BUF_W * 0.1 + BUF_W * 0.8 * (1 - sunAlt);
-      var sy = BUF_H * 0.3 - Math.sin((1 - sunAlt) * Math.PI) * BUF_H * 0.25;
-      var sunR = 4 + sunAlt * 6;
+      // Dim sun through clouds
+      var sunOpacity = Math.max(0.1, sunAlt * (1 - cloudCover / 150));
+      var sx = BUF_W * 0.12 + BUF_W * 0.76 * (1 - sunAlt);
+      var sy = sceneH * 0.3 - Math.sin((1 - sunAlt) * Math.PI) * sceneH * 0.25;
+      var sunR = 3 + sunAlt * 5;
 
       var grad = bufCtx.createRadialGradient(sx, sy, 0, sx, sy, sunR * 4);
       var warm = sunAlt > 0.5 ? [255, 200, 80] : [255, 140, 60];
-      grad.addColorStop(0, "rgba(" + warm[0] + "," + warm[1] + "," + warm[2] + "," + (sunAlt * 0.6).toFixed(2) + ")");
-      grad.addColorStop(0.5, "rgba(" + warm[0] + "," + warm[1] + "," + warm[2] + "," + (sunAlt * 0.15).toFixed(2) + ")");
+      grad.addColorStop(0, "rgba(" + warm[0] + "," + warm[1] + "," + warm[2] + "," + (sunOpacity * 0.6).toFixed(2) + ")");
+      grad.addColorStop(0.5, "rgba(" + warm[0] + "," + warm[1] + "," + warm[2] + "," + (sunOpacity * 0.12).toFixed(2) + ")");
       grad.addColorStop(1, "rgba(" + warm[0] + "," + warm[1] + "," + warm[2] + ",0)");
       bufCtx.fillStyle = grad;
       bufCtx.beginPath();
       bufCtx.arc(sx, sy, sunR * 4, 0, 6.2832);
       bufCtx.fill();
 
-      bufCtx.fillStyle = "rgba(255,240,180," + Math.min(1, sunAlt * 1.5).toFixed(2) + ")";
+      bufCtx.fillStyle = "rgba(255,240,180," + Math.min(1, sunOpacity * 1.5).toFixed(2) + ")";
       bufCtx.beginPath();
       bufCtx.arc(sx, sy, sunR, 0, 6.2832);
       bufCtx.fill();
     }
 
     // ── Moon ──
-    // Moon visible when sun is down (sunAlt < 0)
-    var moonIntensity = sunAlt < 0 ? Math.min(1, Math.abs(sunAlt) * 2) : 0;
-    if (moonIntensity > 0.01) {
-      var mx = BUF_W * 0.75;
-      var my = BUF_H * 0.15;
-      var moonR = 4;
+    var moonInt = sunAlt < 0.05 ? Math.min(1, Math.abs(sunAlt) * 3 + 0.1) : 0;
+    // Dim moon through clouds
+    moonInt *= Math.max(0.15, 1 - cloudCover / 130);
+    if (moonInt > 0.01) {
+      var mx = BUF_W * 0.78;
+      var my = sceneH * 0.15;
+      var moonR = 3.5;
 
       var mg = bufCtx.createRadialGradient(mx, my, 0, mx, my, moonR * 5);
-      mg.addColorStop(0, "rgba(180,200,255," + (moonIntensity * 0.25).toFixed(2) + ")");
-      mg.addColorStop(0.5, "rgba(180,200,255," + (moonIntensity * 0.05).toFixed(2) + ")");
+      mg.addColorStop(0, "rgba(180,200,255," + (moonInt * 0.25).toFixed(2) + ")");
+      mg.addColorStop(0.5, "rgba(180,200,255," + (moonInt * 0.05).toFixed(2) + ")");
       mg.addColorStop(1, "rgba(180,200,255,0)");
       bufCtx.fillStyle = mg;
       bufCtx.beginPath();
       bufCtx.arc(mx, my, moonR * 5, 0, 6.2832);
       bufCtx.fill();
 
-      // Phase: 0=new, 0.25=1stQ, 0.5=full, 0.75=lastQ
-      // Clip to moon circle, draw lit portion
       bufCtx.save();
       bufCtx.beginPath();
       bufCtx.arc(mx, my, moonR, 0, 6.2832);
       bufCtx.clip();
-      bufCtx.fillStyle = "rgba(200,215,255," + (moonIntensity * 0.9).toFixed(2) + ")";
+      bufCtx.fillStyle = "rgba(200,215,255," + (moonInt * 0.9).toFixed(2) + ")";
       if (moonPhase < 0.25) {
         var litEdge = mx + moonR * (1 - moonPhase * 4);
         bufCtx.fillRect(litEdge, my - moonR, mx + moonR - litEdge, moonR * 2);
@@ -258,94 +295,187 @@
     }
 
     // ── Clouds ──
-    var cover = weather.cloud_cover;
-    var numClouds = Math.min(6, Math.ceil(cover / 15));
+    // Density: at 100% cover, clouds fill the entire sky
+    var numClouds = Math.min(12, Math.ceil(cloudCover / 8));
     if (numClouds > 0) {
       cloudDrift += windDrift * 0.04;
       for (var c = 0; c < numClouds; c++) {
-        var cx = ((c / numClouds) * BUF_W * 1.3 + cloudDrift + Math.sin(c * 2.1) * 12) % (BUF_W + 30) - 15;
-        var cy = 8 + (c % 3) * 10;
-        var cw = 14 + c * 3;
-        var ch = 5 + (c % 2) * 2;
-        var op = 0.2 + (cover / 100) * 0.4;
+        var progress = c / numClouds;
+        var cx = ((progress * BUF_W * 1.5 + cloudDrift + Math.sin(c * 2.1) * 10) % (BUF_W + 40)) - 20;
+        var cy = 4 + (c % 4) * (sceneH * 0.12);
+        var cw = 14 + (c % 3) * 6 + (cloudCover / 100) * 8;
+        var ch = 4 + (c % 2) * 2;
+        var op = 0.12 + (cloudCover / 100) * 0.4;
 
-        bufCtx.fillStyle = "rgba(90,100,120," + op.toFixed(2) + ")";
+        bufCtx.fillStyle = "rgba(70,80,100," + op.toFixed(2) + ")";
         bufCtx.beginPath();
         bufCtx.ellipse(cx, cy, cw, ch, 0, 0, 6.2832);
         bufCtx.fill();
         bufCtx.beginPath();
-        bufCtx.ellipse(cx - cw * 0.4, cy - 3, cw * 0.5, ch * 0.6, 0, 0, 6.2832);
+        bufCtx.ellipse(cx - cw * 0.4, cy - 2.5, cw * 0.5, ch * 0.6, 0, 0, 6.2832);
         bufCtx.fill();
         bufCtx.beginPath();
-        bufCtx.ellipse(cx + cw * 0.35, cy - 2, cw * 0.55, ch * 0.55, 0, 0, 6.2832);
+        bufCtx.ellipse(cx + cw * 0.35, cy - 1.5, cw * 0.55, ch * 0.55, 0, 0, 6.2832);
         bufCtx.fill();
+
+        // Extra puffs for thick clouds
+        if (cloudCover > 60) {
+          bufCtx.beginPath();
+          bufCtx.ellipse(cx + cw * 0.1, cy + 2, cw * 0.4, ch * 0.4, 0, 0, 6.2832);
+          bufCtx.fill();
+        }
       }
     }
 
     // ── Rain ──
     if (raindrops.length > 0) {
-      bufCtx.strokeStyle = "rgba(100,160,255,0.7)";
-      bufCtx.lineWidth = 1;
+      // Darker, thicker rain for heavier precipitation
+      var rainAlpha = 0.4 + Math.min(precip / 10, 0.4);
+      var rainWidth = 0.6 + Math.min(precip / 5, 0.8);
+      bufCtx.strokeStyle = "rgba(80,140,255," + rainAlpha.toFixed(2) + ")";
+      bufCtx.lineWidth = rainWidth;
+
       for (var r = 0; r < raindrops.length; r += 3) {
-        raindrops[r + 1] += raindrops[r + 2];
-        raindrops[r] += windDrift * 0.03;
-        if (raindrops[r + 1] > BUF_H) {
+        // Speed scales with precipitation
+        var speed = raindrops[r + 2] * (1 + precip * 0.3);
+        raindrops[r + 1] += speed;
+        // Wind angle: rain tilts with wind speed
+        raindrops[r] += windDrift * 0.04 + Math.sin(rainAngle) * speed * 0.3;
+
+        if (raindrops[r + 1] > sceneH) {
           raindrops[r] = Math.random() * BUF_W;
-          raindrops[r + 1] = -2;
+          raindrops[r + 1] = -2 - Math.random() * 5;
         }
-        if (raindrops[r] > BUF_W) raindrops[r] = 0;
-        if (raindrops[r] < 0) raindrops[r] = BUF_W;
+        if (raindrops[r] > BUF_W + 10) raindrops[r] = -10;
+        if (raindrops[r] < -10) raindrops[r] = BUF_W + 10;
+
+        var dropLen = 1.2 + speed * 0.5;
         bufCtx.beginPath();
         bufCtx.moveTo(raindrops[r], raindrops[r + 1]);
-        bufCtx.lineTo(raindrops[r] + windDrift * 0.02, raindrops[r + 1] + 2);
+        bufCtx.lineTo(
+          raindrops[r] + Math.sin(rainAngle) * dropLen,
+          raindrops[r + 1] + dropLen
+        );
         bufCtx.stroke();
       }
     }
 
     // ── Snow ──
-    if (weather.condition === "snow" || weather.condition === "snow_showers") {
-      bufCtx.fillStyle = "rgba(220,230,255,0.8)";
-      for (var s = 0; s < 20; s++) {
-        var snx = (Math.sin(time / 3000 + s * 1.7) * 0.5 + 0.5) * BUF_W;
-        var sny = ((time / 25 + s * BUF_H / 20) % BUF_H);
+    if (snowflakes.length > 0) {
+      bufCtx.fillStyle = "rgba(210,220,240,0.7)";
+      for (var s = 0; s < snowflakes.length; s += 3) {
+        var sSpeed = snowflakes[s + 2];
+        snowflakes[s + 1] += sSpeed;
+        // Gentle horizontal drift
+        snowflakes[s] += Math.sin(time / 2000 + s * 1.3) * 0.15 + windDrift * 0.02;
+
+        if (snowflakes[s + 1] > sceneH) {
+          snowflakes[s] = Math.random() * BUF_W;
+          snowflakes[s + 1] = -3;
+        }
+        if (snowflakes[s] > BUF_W) snowflakes[s] = 0;
+        if (snowflakes[s] < 0) snowflakes[s] = BUF_W;
+
+        var size = 0.6 + sSpeed * 0.8;
         bufCtx.beginPath();
-        bufCtx.arc(snx, sny, 1, 0, 6.2832);
+        bufCtx.arc(snowflakes[s], snowflakes[s + 1], size, 0, 6.2832);
         bufCtx.fill();
       }
     }
 
-    // ── Lightning ──
-    if (weather.condition === "thunderstorm" && Math.random() < 0.01) {
-      bufCtx.fillStyle = "rgba(255,255,255,0.5)";
-      bufCtx.fillRect(0, 0, BUF_W, BUF_H);
+    // ── Thunderstorm lightning ──
+    if (cond === "thunderstorm") {
+      lightningTimer -= 16;
+      if (lightningTimer <= 0) {
+        // Random flash every 2-6 seconds
+        lightningTimer = 2000 + Math.random() * 4000;
+      }
+      // Flash: bright white overlay fading out
+      var flashProgress = 1 - (lightningTimer / 6000);
+      if (flashProgress < 0.05) {
+        var flashAlpha = flashProgress < 0.02 ? 0.5 : 0;
+        bufCtx.fillStyle = "rgba(200,210,255," + flashAlpha.toFixed(2) + ")";
+        bufCtx.fillRect(0, 0, BUF_W, sceneH);
+      }
     }
 
-    // ── Humidity band at bottom ──
-    var humidH = BUF_H * (weather.humidity / 100) * 0.3;
+    // ── Fog / Mist ──
+    if (cond === "fog" || cond === "mist") {
+      var fogDensity = 0.15 + (weather.humidity / 100) * 0.2;
+      var fogGrad = bufCtx.createLinearGradient(0, 0, 0, sceneH);
+      fogGrad.addColorStop(0, "rgba(150,160,180," + (fogDensity * 0.3).toFixed(2) + ")");
+      fogGrad.addColorStop(0.5, "rgba(150,160,180," + fogDensity.toFixed(2) + ")");
+      fogGrad.addColorStop(1, "rgba(150,160,180," + (fogDensity * 0.6).toFixed(2) + ")");
+      bufCtx.fillStyle = fogGrad;
+      bufCtx.fillRect(0, 0, BUF_W, sceneH);
+    }
+
+    // ── Humidity band at bottom of scene ──
+    var humidH = sceneH * (weather.humidity / 100) * 0.15;
     if (humidH > 1) {
-      var hGrad = bufCtx.createLinearGradient(0, BUF_H - humidH, 0, BUF_H);
+      var hGrad = bufCtx.createLinearGradient(0, sceneH - humidH, 0, sceneH);
       hGrad.addColorStop(0, "rgba(40,80,200,0)");
-      hGrad.addColorStop(1, "rgba(40,80,200,0.12)");
+      hGrad.addColorStop(1, "rgba(40,80,200,0.08)");
       bufCtx.fillStyle = hGrad;
-      bufCtx.fillRect(0, BUF_H - humidH, BUF_W, humidH);
+      bufCtx.fillRect(0, sceneH - humidH, BUF_W, humidH);
+    }
+  }
+
+  // ── Draw sensor values (lower 40% of buffer) ────────────────────
+
+  function drawSensorValues() {
+    var startY = BUF_H * 0.64;
+    var centerX = BUF_W / 2;
+
+    bufCtx.textAlign = "center";
+    bufCtx.textBaseline = "middle";
+
+    if (sensor.temp != null) {
+      bufCtx.font = "bold 18px monospace";
+      bufCtx.fillStyle = "rgba(242,244,248,0.9)";
+      var tempStr = sensor.temp.toFixed(1) + "\u00B0";
+      bufCtx.fillText(tempStr, centerX, startY + 8);
+
+      bufCtx.font = "6px monospace";
+      bufCtx.fillStyle = "rgba(242,244,248,0.25)";
+      bufCtx.fillText("C", centerX + bufCtx.measureText(tempStr).width / 2 + 8, startY + 5);
     }
 
-    // ── Light level glow from left ──
-    var lightNorm = weather.light / 100;
-    if (lightNorm > 0.05) {
-      var lGrad = bufCtx.createLinearGradient(0, 0, BUF_W * 0.4, 0);
-      var lAlpha = lightNorm * 0.15;
-      lGrad.addColorStop(0, "rgba(255,200,100," + lAlpha.toFixed(3) + ")");
-      lGrad.addColorStop(1, "rgba(255,200,100,0)");
-      bufCtx.fillStyle = lGrad;
-      bufCtx.fillRect(0, 0, BUF_W * 0.4, BUF_H);
+    if (sensor.humidity != null) {
+      bufCtx.font = "11px monospace";
+      bufCtx.fillStyle = "rgba(87,115,153,0.8)";
+      bufCtx.fillText(sensor.humidity.toFixed(0) + "%", centerX - 22, startY + 28);
     }
+
+    if (sensor.light != null) {
+      bufCtx.font = "11px monospace";
+      bufCtx.fillStyle = "rgba(243,202,64,0.7)";
+      bufCtx.fillText(sensor.light.toFixed(0) + "%", centerX + 22, startY + 28);
+    }
+
+    bufCtx.font = "5px monospace";
+    bufCtx.fillStyle = "rgba(242,244,248,0.15)";
+    if (sensor.humidity != null) bufCtx.fillText("hum", centerX - 22, startY + 36);
+    if (sensor.light != null) bufCtx.fillText("light", centerX + 22, startY + 36);
   }
 
   // ── Render ──────────────────────────────────────────────────────
 
   function draw(time) {
-    drawBuffer(time);
+    if (!bufCanvas) {
+      bufCanvas = document.createElement("canvas");
+      bufCanvas.width = BUF_W;
+      bufCanvas.height = BUF_H;
+      bufCtx = bufCanvas.getContext("2d");
+    }
+
+    manageParticles();
+
+    bufCtx.fillStyle = "#000";
+    bufCtx.fillRect(0, 0, BUF_W, BUF_H);
+
+    drawWeatherScene(time);
+    drawSensorValues();
 
     var imageData = bufCtx.getImageData(0, 0, BUF_W, BUF_H);
     var buf = imageData.data;
@@ -428,7 +558,9 @@
   requestAnimationFrame(frame);
 
   window.__lattice = {
+    updateSensor: updateSensor,
     updateWeather: updateWeather,
+    sensor: sensor,
     weather: weather,
   };
 })();

@@ -5,119 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>weather.ali.et</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@200;300;400;500;600&family=JetBrains+Mono:wght@300;400&display=swap" rel="stylesheet">
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <canvas id="lattice"></canvas>
-
-  <div class="app">
-    <!-- Split view: outdoors vs server room -->
-    <section class="split glass">
-      <div class="panel panel--outdoor">
-        <div class="panel-header">
-          <span class="panel-tag">outdoors</span>
-          <span class="panel-condition" id="outdoor-condition">--</span>
-        </div>
-        <div class="panel-hero">
-          <div class="panel-hero-value" id="outdoor-temp">--</div>
-          <div class="panel-hero-unit">C</div>
-        </div>
-        <div class="panel-grid">
-          <div class="panel-stat">
-            <span class="panel-stat-key">wind</span>
-            <span class="panel-stat-val" id="outdoor-wind">--</span>
-          </div>
-          <div class="panel-stat">
-            <span class="panel-stat-key">clouds</span>
-            <span class="panel-stat-val" id="outdoor-clouds">--</span>
-          </div>
-          <div class="panel-stat">
-            <span class="panel-stat-key">humidity</span>
-            <span class="panel-stat-val" id="outdoor-humidity">--</span>
-          </div>
-          <div class="panel-stat">
-            <span class="panel-stat-key">precip</span>
-            <span class="panel-stat-val" id="outdoor-precip">--</span>
-          </div>
-          <div class="panel-stat">
-            <span class="panel-stat-key">sunrise</span>
-            <span class="panel-stat-val" id="outdoor-sunrise">--</span>
-          </div>
-          <div class="panel-stat">
-            <span class="panel-stat-key">sunset</span>
-            <span class="panel-stat-val" id="outdoor-sunset">--</span>
-          </div>
-        </div>
-      </div>
-
-      <div class="split-divider"></div>
-
-      <div class="panel panel--indoor">
-        <div class="panel-header">
-          <span class="panel-tag">server room</span>
-          <span class="panel-condition panel-condition--live" id="indoor-status">--</span>
-        </div>
-        <div class="panel-hero">
-          <div class="panel-hero-value" id="indoor-temp">--</div>
-          <div class="panel-hero-unit">C</div>
-        </div>
-        <div class="panel-grid">
-          <div class="panel-stat">
-            <span class="panel-stat-key">humidity</span>
-            <span class="panel-stat-val" id="indoor-humidity">--</span>
-          </div>
-          <div class="panel-stat">
-            <span class="panel-stat-key">light</span>
-            <span class="panel-stat-val" id="indoor-light">--</span>
-          </div>
-          <div class="panel-stat">
-            <span class="panel-stat-key">dew pt</span>
-            <span class="panel-stat-val" id="indoor-dew">--</span>
-          </div>
-          <div class="panel-stat">
-            <span class="panel-stat-key">24h high</span>
-            <span class="panel-stat-val" id="stat-high">--</span>
-          </div>
-          <div class="panel-stat">
-            <span class="panel-stat-key">24h low</span>
-            <span class="panel-stat-val" id="stat-low">--</span>
-          </div>
-          <div class="panel-stat">
-            <span class="panel-stat-key">24h avg</span>
-            <span class="panel-stat-val" id="stat-avg">--</span>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section class="charts">
-      <div class="chart-card glass">
-        <div class="chart-head">
-          <span class="chart-title">temperature</span>
-          <div class="chart-range" id="range-buttons">
-            <button class="range-btn active" data-hours="6">6h</button>
-            <button class="range-btn" data-hours="12">12h</button>
-            <button class="range-btn" data-hours="24">24h</button>
-          </div>
-        </div>
-        <div class="chart-wrap"><canvas id="chart-temp"></canvas></div>
-      </div>
-      <div class="chart-card glass">
-        <div class="chart-head">
-          <span class="chart-title">humidity & light</span>
-        </div>
-        <div class="chart-wrap"><canvas id="chart-hl"></canvas></div>
-      </div>
-    </section>
-
-    <footer class="footer">
-      <span>toilet server room + open-meteo</span>
-      <span id="footer-time">--</span>
-    </footer>
-  </div>
-
+  <div class="clock" id="clock"></div>
   <script src="lattice.js"></script>
   <script src="app.js"></script>
 </body>
