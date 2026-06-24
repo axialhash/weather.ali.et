@@ -122,9 +122,22 @@
       var w = data.weather;
       lastDataTime = Date.now();
 
-      // Feed weather to lattice
-      if (w && window.__lattice) {
-        window.__lattice.updateWeather(w);
+      // Feed weather to lattice (map API fields to lattice expectations)
+      if (window.__lattice) {
+        var lw = {};
+        if (w) {
+          lw.sun_altitude = w.sun_altitude;
+          lw.cloud_cover = w.cloud_cover;
+          lw.wind_speed = w.wind_speed;
+          lw.condition = w.condition;
+          lw.moon_phase = w.moon_phase;
+          lw.temperature = w.outdoor_temp;
+          lw.humidity = w.outdoor_humidity;
+        }
+        if (r && r.light != null) lw.light = r.light;
+        if (r && r.temp != null && lw.temperature == null) lw.temperature = r.temp;
+        if (r && r.humidity != null && lw.humidity == null) lw.humidity = r.humidity;
+        window.__lattice.updateWeather(lw);
       }
 
       requestAnimationFrame(function () {
