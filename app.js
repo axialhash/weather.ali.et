@@ -1,6 +1,6 @@
 /**
- * app.js — weather.ali.et sensor dashboard.
- * Fetches Arduino data + real weather, renders charts, handles offline.
+ * app.js — weather.ali.et split-view dashboard.
+ * Left: outdoor weather (Open-Meteo). Right: server room (Arduino).
  */
 
 (function () {
@@ -21,21 +21,34 @@
   Chart.defaults.font.size = 9;
   Chart.defaults.animation = false;
 
-  // ── DOM cache ───────────────────────────────────
+  // ── DOM cache ────────────────────────────────────
 
-  var $temp = document.getElementById("hero-temp");
-  var $humidity = document.getElementById("val-humidity");
-  var $light = document.getElementById("val-light");
-  var $dew = document.getElementById("val-dew");
+  // Outdoor
+  var $oTemp = document.getElementById("outdoor-temp");
+  var $oCondition = document.getElementById("outdoor-condition");
+  var $oWind = document.getElementById("outdoor-wind");
+  var $oClouds = document.getElementById("outdoor-clouds");
+  var $oHumidity = document.getElementById("outdoor-humidity");
+  var $oPrecip = document.getElementById("outdoor-precip");
+  var $oSunrise = document.getElementById("outdoor-sunrise");
+  var $oSunset = document.getElementById("outdoor-sunset");
+
+  // Indoor
+  var $iTemp = document.getElementById("indoor-temp");
+  var $iStatus = document.getElementById("indoor-status");
+  var $iHumidity = document.getElementById("indoor-humidity");
+  var $iLight = document.getElementById("indoor-light");
+  var $iDew = document.getElementById("indoor-dew");
+  var $iHigh = document.getElementById("stat-high");
+  var $iLow = document.getElementById("stat-low");
+  var $iAvg = document.getElementById("stat-avg");
+
+  // Shared
   var $status = document.getElementById("conn-status");
   var $statusLabel = $status.querySelector(".conn-label");
-  var $high = document.getElementById("stat-high");
-  var $low = document.getElementById("stat-low");
-  var $avg = document.getElementById("stat-avg");
-  var $count = document.getElementById("stat-count");
   var $footerTime = document.getElementById("footer-time");
 
-  // ── Offline banner ──────────────────────────────
+  // ── Offline banner ───────────────────────────────
 
   var banner = document.createElement("div");
   banner.className = "offline-banner";
@@ -51,7 +64,7 @@
     banner.classList.toggle("visible", state !== "live");
   }
 
-  // ── Charts ──────────────────────────────────────
+  // ── Charts ───────────────────────────────────────
 
   function initCharts() {
     var tt = { backgroundColor: "rgba(0,0,0,0.85)", borderColor: "rgba(255,255,255,0.08)", borderWidth: 1, padding: 8, cornerRadius: 4 };
@@ -89,7 +102,7 @@
     });
   }
 
-  // ── Fetch with timeout ──────────────────────────
+  // ── Fetch ────────────────────────────────────────
 
   function fetchJSON(url, ms) {
     var ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
@@ -101,27 +114,44 @@
     }).finally(function () { if (ctrl) clearTimeout(timer); });
   }
 
-  // ── Fetchers ────────────────────────────────────
+  // ── Fetchers ─────────────────────────────────────
 
   function fetchCurrent() {
     return fetchJSON(API + "/api/current", 6000).then(function (data) {
       var r = data.reading;
+      var w = data.weather;
       lastDataTime = Date.now();
 
       // Feed weather to lattice
-      if (data.weather && window.__lattice) {
-        window.__lattice.updateWeather(data.weather);
+      if (w && window.__lattice) {
+        window.__lattice.updateWeather(w);
       }
 
       requestAnimationFrame(function () {
         setStatus(data.serial_connected ? "live" : "stale");
+
+        // Outdoor panel
+        if (w && w.outdoor_temp != null) {
+          $oTemp.textContent = w.outdoor_temp.toFixed(1);
+          $oTemp.classList.remove("stale");
+          $oCondition.textContent = (w.condition || "--").replace(/_/g, " ");
+          $oWind.textContent = w.wind_speed != null ? w.wind_speed.toFixed(1) + " km/h" : "--";
+          $oClouds.textContent = w.cloud_cover != null ? w.cloud_cover + "%" : "--";
+          $oHumidity.textContent = w.outdoor_humidity != null ? w.outdoor_humidity + "%" : "--";
+          $oPrecip.textContent = w.precipitation != null ? w.precipitation + " mm" : "--";
+          $oSunrise.textContent = w.sunrise ? w.sunrise.split("T")[1] : "--";
+          $oSunset.textContent = w.sunset ? w.sunset.split("T")[1] : "--";
+        }
+
+        // Indoor panel
         if (r && r.temp != null) {
-          $temp.textContent = r.temp.toFixed(1);
-          $temp.classList.remove("stale");
-          $humidity.textContent = r.humidity != null ? r.humidity.toFixed(0) + "%" : "--";
-          $light.textContent = r.light != null ? r.light + "%" : "--";
+          $iTemp.textContent = r.temp.toFixed(1);
+          $iTemp.classList.remove("stale");
+          $iStatus.textContent = data.serial_connected ? "live" : "stale";
+          $iHumidity.textContent = r.humidity != null ? r.humidity.toFixed(0) + "%" : "--";
+          $iLight.textContent = r.light != null ? r.light + "%" : "--";
           if (r.humidity != null) {
-            $dew.textContent = (r.temp - (100 - r.humidity) / 5).toFixed(1) + " C";
+            $iDew.textContent = (r.temp - (100 - r.humidity) / 5).toFixed(1) + "\u00B0";
           }
         }
       });
@@ -129,7 +159,8 @@
       if (Date.now() - lastDataTime > STALE_MS) {
         requestAnimationFrame(function () {
           setStatus("offline");
-          $temp.classList.add("stale");
+          $oTemp.classList.add("stale");
+          $iTemp.classList.add("stale");
         });
       }
     });
@@ -162,16 +193,15 @@
     return fetchJSON(API + "/api/stats?hours=24", 10000).then(function (s) {
       if (s.sample_count > 0) {
         requestAnimationFrame(function () {
-          $high.textContent = s.temp_max.toFixed(1) + "\u00B0";
-          $low.textContent = s.temp_min.toFixed(1) + "\u00B0";
-          $avg.textContent = s.temp_avg.toFixed(1) + "\u00B0";
-          $count.textContent = s.sample_count.toLocaleString();
+          $iHigh.textContent = s.temp_max.toFixed(1) + "\u00B0";
+          $iLow.textContent = s.temp_min.toFixed(1) + "\u00B0";
+          $iAvg.textContent = s.temp_avg.toFixed(1) + "\u00B0";
         });
       }
     }).catch(function () {});
   }
 
-  // ── Range buttons ───────────────────────────────
+  // ── Range buttons ────────────────────────────────
 
   document.getElementById("range-buttons").addEventListener("click", function (e) {
     var btn = e.target.closest(".range-btn");
@@ -182,7 +212,7 @@
     fetchHistory();
   });
 
-  // ── Clock ───────────────────────────────────────
+  // ── Clock ────────────────────────────────────────
 
   function tickClock() {
     var n = new Date();
@@ -191,7 +221,7 @@
       n.getSeconds().toString().padStart(2, "0") + " EAT";
   }
 
-  // ── Init ────────────────────────────────────────
+  // ── Init ─────────────────────────────────────────
 
   initCharts();
   fetchCurrent();
@@ -205,7 +235,6 @@
   setInterval(function () {
     if (lastDataTime > 0 && Date.now() - lastDataTime > STALE_MS) {
       setStatus("offline");
-      $temp.classList.add("stale");
     }
   }, 3000);
 })();

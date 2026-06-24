@@ -25,54 +25,82 @@
       </div>
     </header>
 
-    <section class="hero">
-      <div class="hero-reading">
-        <div class="hero-value" id="hero-temp">--</div>
-        <div class="hero-unit">C</div>
+    <!-- Split view: outdoors vs server room -->
+    <section class="split">
+      <div class="panel panel--outdoor">
+        <div class="panel-header">
+          <span class="panel-tag">outdoors</span>
+          <span class="panel-condition" id="outdoor-condition">--</span>
+        </div>
+        <div class="panel-hero">
+          <div class="panel-hero-value" id="outdoor-temp">--</div>
+          <div class="panel-hero-unit">C</div>
+        </div>
+        <div class="panel-grid">
+          <div class="panel-stat">
+            <span class="panel-stat-key">wind</span>
+            <span class="panel-stat-val" id="outdoor-wind">--</span>
+          </div>
+          <div class="panel-stat">
+            <span class="panel-stat-key">clouds</span>
+            <span class="panel-stat-val" id="outdoor-clouds">--</span>
+          </div>
+          <div class="panel-stat">
+            <span class="panel-stat-key">humidity</span>
+            <span class="panel-stat-val" id="outdoor-humidity">--</span>
+          </div>
+          <div class="panel-stat">
+            <span class="panel-stat-key">precip</span>
+            <span class="panel-stat-val" id="outdoor-precip">--</span>
+          </div>
+          <div class="panel-stat">
+            <span class="panel-stat-key">sunrise</span>
+            <span class="panel-stat-val" id="outdoor-sunrise">--</span>
+          </div>
+          <div class="panel-stat">
+            <span class="panel-stat-key">sunset</span>
+            <span class="panel-stat-val" id="outdoor-sunset">--</span>
+          </div>
+        </div>
       </div>
-      <div class="hero-meta">toilet server room</div>
-    </section>
 
-    <section class="metrics">
-      <div class="metric">
-        <div class="metric-icon metric-icon--humidity"></div>
-        <div class="metric-data">
-          <div class="metric-value" id="val-humidity">--</div>
-          <div class="metric-label">humidity</div>
-        </div>
-      </div>
-      <div class="metric">
-        <div class="metric-icon metric-icon--light"></div>
-        <div class="metric-data">
-          <div class="metric-value" id="val-light">--</div>
-          <div class="metric-label">light</div>
-        </div>
-      </div>
-      <div class="metric">
-        <div class="metric-icon metric-icon--dew"></div>
-        <div class="metric-data">
-          <div class="metric-value" id="val-dew">--</div>
-          <div class="metric-label">dew point</div>
-        </div>
-      </div>
-    </section>
+      <div class="split-divider"></div>
 
-    <section class="stats-row">
-      <div class="stat">
-        <span class="stat-key">24h high</span>
-        <span class="stat-val" id="stat-high">--</span>
-      </div>
-      <div class="stat">
-        <span class="stat-key">24h low</span>
-        <span class="stat-val" id="stat-low">--</span>
-      </div>
-      <div class="stat">
-        <span class="stat-key">24h avg</span>
-        <span class="stat-val" id="stat-avg">--</span>
-      </div>
-      <div class="stat">
-        <span class="stat-key">samples</span>
-        <span class="stat-val" id="stat-count">--</span>
+      <div class="panel panel--indoor">
+        <div class="panel-header">
+          <span class="panel-tag">server room</span>
+          <span class="panel-condition panel-condition--live" id="indoor-status">--</span>
+        </div>
+        <div class="panel-hero">
+          <div class="panel-hero-value" id="indoor-temp">--</div>
+          <div class="panel-hero-unit">C</div>
+        </div>
+        <div class="panel-grid">
+          <div class="panel-stat">
+            <span class="panel-stat-key">humidity</span>
+            <span class="panel-stat-val" id="indoor-humidity">--</span>
+          </div>
+          <div class="panel-stat">
+            <span class="panel-stat-key">light</span>
+            <span class="panel-stat-val" id="indoor-light">--</span>
+          </div>
+          <div class="panel-stat">
+            <span class="panel-stat-key">dew pt</span>
+            <span class="panel-stat-val" id="indoor-dew">--</span>
+          </div>
+          <div class="panel-stat">
+            <span class="panel-stat-key">24h high</span>
+            <span class="panel-stat-val" id="stat-high">--</span>
+          </div>
+          <div class="panel-stat">
+            <span class="panel-stat-key">24h low</span>
+            <span class="panel-stat-val" id="stat-low">--</span>
+          </div>
+          <div class="panel-stat">
+            <span class="panel-stat-key">24h avg</span>
+            <span class="panel-stat-val" id="stat-avg">--</span>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -97,7 +125,7 @@
     </section>
 
     <footer class="footer">
-      <span>sensors in the toilet server room</span>
+      <span>toilet server room + open-meteo</span>
       <span id="footer-time">--</span>
     </footer>
   </div>
