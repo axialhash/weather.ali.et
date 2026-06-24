@@ -1,15 +1,8 @@
 /**
  * lattice.js — Diamond PenTile AMOLED subpixel lattice.
  *
- * Approach (matching amoled-renderer.js):
- *  1. Draw weather into tiny offscreen canvas (FrameBuffer)
- *  2. Read RGB pixel data
- *  3. Each subpixel samples via nearest-neighbor
- *  4. Green subs → G channel, Red → R, Blue → B
- *  5. Render as circles (green) or diamonds (R/B)
- *
- * Base glow: subpixels always have a faint dim level (like real OLED inactive pixels).
- * Weather elements drive brightness up from that floor.
+ * Sun/moon positions are calculated dynamically from sunrise/sunset times
+ * using the current clock — not cached backend values.
  */
 
 (function () {
@@ -23,33 +16,59 @@
   var subpixels = [];
   var isMobile = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
 
-  // Offscreen weather buffer (FrameBuffer)
+  // Offscreen weather buffer
   var bufCanvas, bufCtx;
   var BUF_W = 160;
   var BUF_H = 100;
 
-  // Weather state
+  // Weather state — sun/moon are computed live from sunrise/sunset
   var weather = {
-    sun_altitude: 0.5,
     cloud_cover: 0,
     wind_speed: 0,
     condition: "clear",
-    moon_phase: 0.5,
     temperature: 22,
     humidity: 50,
     light: 50,
+    sunrise: null,   // Date object
+    sunset: null,     // Date object
   };
 
   var raindrops = [];
   var cloudDrift = 0;
   var lastTime = 0;
 
-  // Config — smaller pitch = higher resolution lattice
+  // Config
   var PITCH = isMobile ? 8 : 5;
   var BASE_BRIGHTNESS = 12;
   var WEATHER_MULT = 1.6;
 
-  // Geometry rebuild
+  // ── Dynamic sun/moon calculation ────────────────────────────────
+
+  function calcSunAltitude() {
+    var sr = weather.sunrise;
+    var ss = weather.sunset;
+    if (!sr || !ss) return 0.5;
+
+    var now = Date.now();
+    var srMs = sr.getTime();
+    var ssMs = ss.getTime();
+    var dl = ssMs - srMs;
+    if (dl <= 0) return -0.3;
+
+    var elapsed = now - srMs;
+    var alt = Math.sin((elapsed / dl) * Math.PI);
+    return Math.max(-0.3, alt);
+  }
+
+  function calcMoonPhase() {
+    // Known new moon: Jan 6 2000 18:14 UTC
+    var knownNew = Date.UTC(2000, 0, 6, 18, 14, 0);
+    var diff = (Date.now() - knownNew) / 86400000;
+    return (diff % 29.53058867) / 29.53058867;
+  }
+
+  // ── Geometry rebuild ────────────────────────────────────────────
+
   function rebuild() {
     var dpr = Math.min(window.devicePixelRatio || 1, isMobile ? 1.5 : 2);
     W = window.innerWidth;
@@ -107,18 +126,36 @@
     }
   }
 
-  // Weather update
+  // ── Weather update ──────────────────────────────────────────────
+
   function updateWeather(data) {
     if (!data) return;
-    if (data.sun_altitude != null) weather.sun_altitude = data.sun_altitude;
     if (data.cloud_cover != null) weather.cloud_cover = data.cloud_cover;
     if (data.wind_speed != null) weather.wind_speed = data.wind_speed;
     if (data.condition) weather.condition = data.condition;
-    if (data.moon_phase != null) weather.moon_phase = data.moon_phase;
     if (data.temperature != null) weather.temperature = data.temperature;
     if (data.humidity != null) weather.humidity = data.humidity;
     if (data.light != null) weather.light = data.light;
 
+    // Parse sunrise/sunset ISO strings into Date objects
+    if (data.sunrise) {
+      var sr = data.sunrise;
+      if (typeof sr === "string") {
+        weather.sunrise = new Date(sr.includes("T") ? sr : sr + "T06:00");
+      } else if (sr instanceof Date) {
+        weather.sunrise = sr;
+      }
+    }
+    if (data.sunset) {
+      var ss = data.sunset;
+      if (typeof ss === "string") {
+        weather.sunset = new Date(ss.includes("T") ? ss : ss + "T18:00");
+      } else if (ss instanceof Date) {
+        weather.sunset = ss;
+      }
+    }
+
+    // Rain particles
     var cond = weather.condition;
     if (cond === "rain" || cond === "drizzle" || cond === "rain_showers") {
       var target = cond === "drizzle" ? 20 : 40;
@@ -131,7 +168,8 @@
     }
   }
 
-  // Draw weather into tiny buffer
+  // ── Draw weather into tiny buffer ───────────────────────────────
+
   function drawBuffer(time) {
     if (!bufCanvas) {
       bufCanvas = document.createElement("canvas");
@@ -143,7 +181,9 @@
     bufCtx.fillStyle = "#000";
     bufCtx.fillRect(0, 0, BUF_W, BUF_H);
 
-    var sunAlt = weather.sun_altitude;
+    // Calculate sun/moon from current time
+    var sunAlt = calcSunAltitude();
+    var moonPhase = calcMoonPhase();
     var windDrift = (weather.wind_speed / 10) * 0.3;
 
     // Background color wash based on temperature
@@ -153,9 +193,11 @@
     bufCtx.fillStyle = "rgb(" + bgR + ",2," + bgB + ")";
     bufCtx.fillRect(0, 0, BUF_W, BUF_H);
 
-    // Sun
+    // ── Sun ──
     if (sunAlt > 0.01) {
-      var sx = BUF_W * 0.15 + BUF_W * 0.7 * (1 - sunAlt);
+      // Sun arcs across the top of the buffer
+      // sunAlt goes 0→1→0 during the day (sunrise→noon→sunset)
+      var sx = BUF_W * 0.1 + BUF_W * 0.8 * (1 - sunAlt);
       var sy = BUF_H * 0.3 - Math.sin((1 - sunAlt) * Math.PI) * BUF_H * 0.25;
       var sunR = 4 + sunAlt * 6;
 
@@ -175,35 +217,36 @@
       bufCtx.fill();
     }
 
-    // Moon
-    var moonInt = sunAlt < 0.05 ? (1 - sunAlt / 0.05) : 0;
-    if (moonInt > 0.01) {
+    // ── Moon ──
+    // Moon visible when sun is down (sunAlt < 0)
+    var moonIntensity = sunAlt < 0 ? Math.min(1, Math.abs(sunAlt) * 2) : 0;
+    if (moonIntensity > 0.01) {
       var mx = BUF_W * 0.75;
       var my = BUF_H * 0.15;
       var moonR = 4;
 
       var mg = bufCtx.createRadialGradient(mx, my, 0, mx, my, moonR * 5);
-      mg.addColorStop(0, "rgba(180,200,255," + (moonInt * 0.25).toFixed(2) + ")");
-      mg.addColorStop(0.5, "rgba(180,200,255," + (moonInt * 0.05).toFixed(2) + ")");
+      mg.addColorStop(0, "rgba(180,200,255," + (moonIntensity * 0.25).toFixed(2) + ")");
+      mg.addColorStop(0.5, "rgba(180,200,255," + (moonIntensity * 0.05).toFixed(2) + ")");
       mg.addColorStop(1, "rgba(180,200,255,0)");
       bufCtx.fillStyle = mg;
       bufCtx.beginPath();
       bufCtx.arc(mx, my, moonR * 5, 0, 6.2832);
       bufCtx.fill();
 
-      bufCtx.fillStyle = "rgba(200,215,255," + (moonInt * 0.9).toFixed(2) + ")";
+      bufCtx.fillStyle = "rgba(200,215,255," + (moonIntensity * 0.9).toFixed(2) + ")";
       bufCtx.beginPath();
       bufCtx.arc(mx, my, moonR, 0, 6.2832);
       bufCtx.fill();
 
-      var shadowW = moonR * Math.cos(weather.moon_phase * Math.PI * 2) * 0.8;
-      bufCtx.fillStyle = "rgba(0,0,0," + (moonInt * 0.7).toFixed(2) + ")";
+      var shadowW = moonR * Math.cos(moonPhase * Math.PI * 2) * 0.8;
+      bufCtx.fillStyle = "rgba(0,0,0," + (moonIntensity * 0.7).toFixed(2) + ")";
       bufCtx.beginPath();
       bufCtx.ellipse(mx + shadowW * 0.3, my, Math.abs(shadowW) + 1, moonR, 0, 0, 6.2832);
       bufCtx.fill();
     }
 
-    // Clouds
+    // ── Clouds ──
     var cover = weather.cloud_cover;
     var numClouds = Math.min(6, Math.ceil(cover / 15));
     if (numClouds > 0) {
@@ -228,7 +271,7 @@
       }
     }
 
-    // Rain
+    // ── Rain ──
     if (raindrops.length > 0) {
       bufCtx.strokeStyle = "rgba(100,160,255,0.7)";
       bufCtx.lineWidth = 1;
@@ -248,7 +291,7 @@
       }
     }
 
-    // Snow
+    // ── Snow ──
     if (weather.condition === "snow" || weather.condition === "snow_showers") {
       bufCtx.fillStyle = "rgba(220,230,255,0.8)";
       for (var s = 0; s < 20; s++) {
@@ -260,13 +303,13 @@
       }
     }
 
-    // Lightning
+    // ── Lightning ──
     if (weather.condition === "thunderstorm" && Math.random() < 0.01) {
       bufCtx.fillStyle = "rgba(255,255,255,0.5)";
       bufCtx.fillRect(0, 0, BUF_W, BUF_H);
     }
 
-    // Humidity band at bottom
+    // ── Humidity band at bottom ──
     var humidH = BUF_H * (weather.humidity / 100) * 0.3;
     if (humidH > 1) {
       var hGrad = bufCtx.createLinearGradient(0, BUF_H - humidH, 0, BUF_H);
@@ -276,7 +319,7 @@
       bufCtx.fillRect(0, BUF_H - humidH, BUF_W, humidH);
     }
 
-    // Light level glow from left
+    // ── Light level glow from left ──
     var lightNorm = weather.light / 100;
     if (lightNorm > 0.05) {
       var lGrad = bufCtx.createLinearGradient(0, 0, BUF_W * 0.4, 0);
@@ -288,7 +331,8 @@
     }
   }
 
-  // Render — AMOLED approach: sample buffer through subpixel grid
+  // ── Render ──────────────────────────────────────────────────────
+
   function draw(time) {
     drawBuffer(time);
 
@@ -310,7 +354,6 @@
       var normX = sp[i + 4];
       var normY = sp[i + 5];
 
-      // Sample buffer (nearest neighbor)
       var bx = Math.min(BUF_W - 1, Math.max(0, Math.round(normX * (BUF_W - 1))));
       var by = Math.min(BUF_H - 1, Math.max(0, Math.round(normY * (BUF_H - 1))));
       var idx = (by * BUF_W + bx) * 4;
@@ -318,13 +361,11 @@
       var gPix = buf[idx + 1];
       var bPix = buf[idx + 2];
 
-      // Pick channel based on subpixel type
       var ch;
       if (type === 0) ch = gPix;
       else if (type === 1) ch = rPix;
       else ch = bPix;
 
-      // Mix: base glow + weather contribution
       var brightness = BASE_BRIGHTNESS + ch * WEATHER_MULT;
       if (brightness > 255) brightness = 255;
       if (brightness < 2) continue;
@@ -355,7 +396,8 @@
     }
   }
 
-  // RAF loop with throttling
+  // ── RAF loop ────────────────────────────────────────────────────
+
   var frameSkip = isMobile ? 50 : 33;
 
   function frame(time) {

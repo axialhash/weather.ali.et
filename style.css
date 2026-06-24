@@ -47,68 +47,9 @@ body {
   z-index: 2;
   max-width: 900px;
   margin: 0 auto;
-  padding: 1.5rem;
+  padding: 2rem 1.5rem;
   min-height: 100vh;
 }
-
-/* ── Header ───────────────────────────────────────── */
-
-.header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 2rem;
-  padding-bottom: 1rem;
-  border-bottom: 1px solid var(--border);
-}
-
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-}
-
-.brand-mark {
-  width: 8px;
-  height: 8px;
-  background: var(--green);
-  border-radius: 50%;
-  box-shadow: 0 0 8px var(--green);
-}
-
-.brand-name {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.8rem;
-  font-weight: 400;
-  letter-spacing: 0.05em;
-  color: var(--text-2);
-}
-
-.conn-status {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.7rem;
-  color: var(--text-3);
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-}
-
-.conn-dot {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--text-3);
-  transition: background 0.3s;
-}
-
-.conn-status.live .conn-dot { background: var(--green); box-shadow: 0 0 6px var(--green); }
-.conn-status.stale .conn-dot { background: var(--amber); }
-.conn-status.offline .conn-dot { background: var(--red); }
-.conn-status.live { color: var(--green); }
-.conn-status.stale { color: var(--amber); }
-.conn-status.offline { color: var(--red); }
 
 /* ── Split panels ─────────────────────────────────── */
 
@@ -276,7 +217,7 @@ body {
 }
 
 .chart-wrap {
-  height: 180px;
+  height: 200px;
 }
 
 /* ── Footer ───────────────────────────────────────── */

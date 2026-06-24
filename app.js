@@ -23,7 +23,6 @@
 
   // ── DOM cache ────────────────────────────────────
 
-  // Outdoor
   var $oTemp = document.getElementById("outdoor-temp");
   var $oCondition = document.getElementById("outdoor-condition");
   var $oWind = document.getElementById("outdoor-wind");
@@ -33,7 +32,6 @@
   var $oSunrise = document.getElementById("outdoor-sunrise");
   var $oSunset = document.getElementById("outdoor-sunset");
 
-  // Indoor
   var $iTemp = document.getElementById("indoor-temp");
   var $iStatus = document.getElementById("indoor-status");
   var $iHumidity = document.getElementById("indoor-humidity");
@@ -43,9 +41,6 @@
   var $iLow = document.getElementById("stat-low");
   var $iAvg = document.getElementById("stat-avg");
 
-  // Shared
-  var $status = document.getElementById("conn-status");
-  var $statusLabel = $status.querySelector(".conn-label");
   var $footerTime = document.getElementById("footer-time");
 
   // ── Offline banner ───────────────────────────────
@@ -55,28 +50,72 @@
   banner.textContent = "api unreachable \u2014 retrying";
   document.body.appendChild(banner);
 
-  var lastState = "connecting";
-  function setStatus(state) {
-    if (state === lastState) return;
-    lastState = state;
-    $status.className = "conn-status " + state;
-    $statusLabel.textContent = state === "live" ? "live" : state === "stale" ? "stale" : "offline";
-    banner.classList.toggle("visible", state !== "live");
-  }
-
   // ── Charts ───────────────────────────────────────
 
   function initCharts() {
-    var tt = { backgroundColor: "rgba(0,0,0,0.85)", borderColor: "rgba(255,255,255,0.08)", borderWidth: 1, padding: 8, cornerRadius: 4 };
+    var tt = {
+      backgroundColor: "rgba(0,0,0,0.85)",
+      borderColor: "rgba(255,255,255,0.08)",
+      borderWidth: 1,
+      padding: 10,
+      cornerRadius: 6,
+      titleFont: { family: "'JetBrains Mono', monospace", size: 10 },
+      bodyFont: { family: "'JetBrains Mono', monospace", size: 11 },
+    };
 
     chartTemp = new Chart(document.getElementById("chart-temp"), {
       type: "line",
-      data: { labels: [], datasets: [{ data: [], borderColor: "#00ff88", backgroundColor: "rgba(0,255,136,0.06)", borderWidth: 1.5, pointRadius: 0, tension: 0.3, fill: true }] },
+      data: {
+        labels: [],
+        datasets: [{
+          data: [],
+          borderColor: "#00ff88",
+          backgroundColor: function(ctx) {
+            var chart = ctx.chart;
+            var area = chart.chartArea;
+            if (!area) return "rgba(0,255,136,0.06)";
+            var g = chart.ctx.createLinearGradient(0, area.top, 0, area.bottom);
+            g.addColorStop(0, "rgba(0,255,136,0.15)");
+            g.addColorStop(1, "rgba(0,255,136,0.01)");
+            return g;
+          },
+          borderWidth: 1.5,
+          pointRadius: 0,
+          pointHoverRadius: 4,
+          pointHoverBackgroundColor: "#00ff88",
+          pointHoverBorderColor: "#000",
+          pointHoverBorderWidth: 2,
+          tension: 0.4,
+          fill: true,
+        }]
+      },
       options: {
-        responsive: true, maintainAspectRatio: false, animation: false,
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false,
         interaction: { intersect: false, mode: "index" },
-        plugins: { legend: { display: false }, tooltip: tt },
-        scales: { x: { grid: { display: false }, ticks: { maxTicksLimit: 6, maxRotation: 0 } }, y: { grid: { color: "rgba(255,255,255,0.03)" }, ticks: { callback: function (v) { return v + "\u00B0"; } } } }
+        plugins: {
+          legend: { display: false },
+          tooltip: Object.assign({}, tt, {
+            callbacks: {
+              label: function(ctx) { return ctx.parsed.y.toFixed(1) + "\u00B0C"; }
+            }
+          })
+        },
+        scales: {
+          x: {
+            grid: { display: false },
+            ticks: { maxTicksLimit: 8, maxRotation: 0, font: { size: 8 } }
+          },
+          y: {
+            grid: { color: "rgba(255,255,255,0.03)" },
+            ticks: {
+              callback: function(v) { return v + "\u00B0"; },
+              font: { size: 8 },
+              maxTicksLimit: 6,
+            }
+          }
+        }
       }
     });
 
@@ -85,18 +124,97 @@
       data: {
         labels: [],
         datasets: [
-          { label: "Humidity", data: [], borderColor: "#4488ff", backgroundColor: "rgba(68,136,255,0.06)", borderWidth: 1.5, pointRadius: 0, tension: 0.3, fill: true, yAxisID: "y" },
-          { label: "Light", data: [], borderColor: "#ffaa33", backgroundColor: "rgba(255,170,51,0.06)", borderWidth: 1.5, pointRadius: 0, tension: 0.3, fill: true, yAxisID: "y1" }
+          {
+            label: "Humidity",
+            data: [],
+            borderColor: "#4488ff",
+            backgroundColor: function(ctx) {
+              var chart = ctx.chart;
+              var area = chart.chartArea;
+              if (!area) return "rgba(68,136,255,0.06)";
+              var g = chart.ctx.createLinearGradient(0, area.top, 0, area.bottom);
+              g.addColorStop(0, "rgba(68,136,255,0.12)");
+              g.addColorStop(1, "rgba(68,136,255,0.01)");
+              return g;
+            },
+            borderWidth: 1.5,
+            pointRadius: 0,
+            pointHoverRadius: 4,
+            pointHoverBackgroundColor: "#4488ff",
+            tension: 0.4,
+            fill: true,
+            yAxisID: "y",
+          },
+          {
+            label: "Light",
+            data: [],
+            borderColor: "#ffaa33",
+            backgroundColor: function(ctx) {
+              var chart = ctx.chart;
+              var area = chart.chartArea;
+              if (!area) return "rgba(255,170,51,0.06)";
+              var g = chart.ctx.createLinearGradient(0, area.top, 0, area.bottom);
+              g.addColorStop(0, "rgba(255,170,51,0.12)");
+              g.addColorStop(1, "rgba(255,170,51,0.01)");
+              return g;
+            },
+            borderWidth: 1.5,
+            pointRadius: 0,
+            pointHoverRadius: 4,
+            pointHoverBackgroundColor: "#ffaa33",
+            tension: 0.4,
+            fill: true,
+            yAxisID: "y1",
+          }
         ]
       },
       options: {
-        responsive: true, maintainAspectRatio: false, animation: false,
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false,
         interaction: { intersect: false, mode: "index" },
-        plugins: { legend: { display: true, position: "top", align: "end", labels: { boxWidth: 6, boxHeight: 6, usePointStyle: true, pointStyle: "circle", padding: 10, font: { size: 8 } } }, tooltip: tt },
+        plugins: {
+          legend: {
+            display: true,
+            position: "top",
+            align: "end",
+            labels: {
+              boxWidth: 6,
+              boxHeight: 6,
+              usePointStyle: true,
+              pointStyle: "circle",
+              padding: 12,
+              font: { size: 8 },
+            }
+          },
+          tooltip: Object.assign({}, tt, {
+            callbacks: {
+              label: function(ctx) {
+                var unit = ctx.datasetIndex === 0 ? "%" : "%";
+                return ctx.dataset.label + ": " + ctx.parsed.y.toFixed(0) + unit;
+              }
+            }
+          })
+        },
         scales: {
-          x: { grid: { display: false }, ticks: { maxTicksLimit: 6, maxRotation: 0 } },
-          y: { position: "left", grid: { color: "rgba(255,255,255,0.03)" }, ticks: { callback: function (v) { return v + "%"; } }, min: 0, max: 100 },
-          y1: { position: "right", grid: { display: false }, ticks: { callback: function (v) { return v + "%"; } }, min: 0, max: 100 }
+          x: {
+            grid: { display: false },
+            ticks: { maxTicksLimit: 8, maxRotation: 0, font: { size: 8 } }
+          },
+          y: {
+            position: "left",
+            grid: { color: "rgba(255,255,255,0.03)" },
+            ticks: { callback: function(v) { return v + "%"; }, font: { size: 8 }, maxTicksLimit: 6 },
+            min: 0,
+            max: 100,
+          },
+          y1: {
+            position: "right",
+            grid: { display: false },
+            ticks: { callback: function(v) { return v + "%"; }, font: { size: 8 }, maxTicksLimit: 6 },
+            min: 0,
+            max: 100,
+          }
         }
       }
     });
@@ -122,17 +240,17 @@
       var w = data.weather;
       lastDataTime = Date.now();
 
-      // Feed weather to lattice (map API fields to lattice expectations)
+      // Feed weather to lattice — pass sunrise/sunset for dynamic sun/moon calc
       if (window.__lattice) {
         var lw = {};
         if (w) {
-          lw.sun_altitude = w.sun_altitude;
           lw.cloud_cover = w.cloud_cover;
           lw.wind_speed = w.wind_speed;
           lw.condition = w.condition;
-          lw.moon_phase = w.moon_phase;
           lw.temperature = w.outdoor_temp;
           lw.humidity = w.outdoor_humidity;
+          lw.sunrise = w.sunrise;
+          lw.sunset = w.sunset;
         }
         if (r && r.light != null) lw.light = r.light;
         if (r && r.temp != null && lw.temperature == null) lw.temperature = r.temp;
@@ -141,7 +259,14 @@
       }
 
       requestAnimationFrame(function () {
-        setStatus(data.serial_connected ? "live" : "stale");
+        var live = data.serial_connected;
+        var statusEl = document.getElementById("conn-status");
+        if (statusEl) {
+          statusEl.className = "conn-status " + (live ? "live" : "stale");
+          var lbl = statusEl.querySelector(".conn-label");
+          if (lbl) lbl.textContent = live ? "live" : "stale";
+        }
+        banner.classList.toggle("visible", !live);
 
         // Outdoor panel
         if (w && w.outdoor_temp != null) {
@@ -160,7 +285,7 @@
         if (r && r.temp != null) {
           $iTemp.textContent = r.temp.toFixed(1);
           $iTemp.classList.remove("stale");
-          $iStatus.textContent = data.serial_connected ? "live" : "stale";
+          $iStatus.textContent = live ? "live" : "stale";
           $iHumidity.textContent = r.humidity != null ? r.humidity.toFixed(0) + "%" : "--";
           $iLight.textContent = r.light != null ? r.light + "%" : "--";
           if (r.humidity != null) {
@@ -171,7 +296,7 @@
     }).catch(function () {
       if (Date.now() - lastDataTime > STALE_MS) {
         requestAnimationFrame(function () {
-          setStatus("offline");
+          banner.classList.add("visible");
           $oTemp.classList.add("stale");
           $iTemp.classList.add("stale");
         });
@@ -247,7 +372,7 @@
   setInterval(tickClock, 1000);
   setInterval(function () {
     if (lastDataTime > 0 && Date.now() - lastDataTime > STALE_MS) {
-      setStatus("offline");
+      banner.classList.add("visible");
     }
   }, 3000);
 })();
