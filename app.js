@@ -79,13 +79,13 @@
             g.addColorStop(1, "rgba(243,202,64,0.01)");
             return g;
           },
-          borderWidth: 1.5,
+          borderWidth: 2,
           pointRadius: 0,
-          pointHoverRadius: 4,
+          pointHoverRadius: 5,
           pointHoverBackgroundColor: "#F3CA40",
           pointHoverBorderColor: "#000",
           pointHoverBorderWidth: 2,
-          tension: 0.4,
+          tension: 0.5,
           fill: true,
         }]
       },
@@ -94,6 +94,7 @@
         maintainAspectRatio: false,
         animation: false,
         interaction: { intersect: false, mode: "index" },
+        hover: { mode: "index", intersect: false },
         plugins: {
           legend: { display: false },
           tooltip: Object.assign({}, tt, {
@@ -137,11 +138,11 @@
               g.addColorStop(1, "rgba(87,115,153,0.01)");
               return g;
             },
-            borderWidth: 1.5,
+            borderWidth: 2,
             pointRadius: 0,
-            pointHoverRadius: 4,
+            pointHoverRadius: 5,
             pointHoverBackgroundColor: "#577399",
-            tension: 0.4,
+            tension: 0.5,
             fill: true,
             yAxisID: "y",
           },
@@ -158,11 +159,11 @@
               g.addColorStop(1, "rgba(242,244,248,0.01)");
               return g;
             },
-            borderWidth: 1.5,
+            borderWidth: 2,
             pointRadius: 0,
-            pointHoverRadius: 4,
+            pointHoverRadius: 5,
             pointHoverBackgroundColor: "rgba(242,244,248,0.5)",
-            tension: 0.4,
+            tension: 0.5,
             fill: true,
             yAxisID: "y1",
           }
@@ -173,6 +174,7 @@
         maintainAspectRatio: false,
         animation: false,
         interaction: { intersect: false, mode: "index" },
+        hover: { mode: "index", intersect: false },
         plugins: {
           legend: {
             display: true,
