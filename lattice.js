@@ -1,128 +1,153 @@
 /**
- * lattice.js — AMOLED Diamond PenTile Subpixel Lattice
+ * lattice.js — Diamond PenTile subpixel lattice background.
  *
- * Renders the actual AMOLED subpixel geometry as a living background.
- * Green circles, red/blue diamonds — the real PenTile arrangement.
+ * Ported from alikhalidsherif/AMOLED diamond-pentile-geometry.js
+ * Renders the actual AMOLED subpixel arrangement: green circles, red/blue diamonds.
  */
 
-(function initLattice() {
-  const canvas = document.getElementById('lattice');
-  const ctx = canvas.getContext('2d', { alpha: false });
+(function () {
+  var canvas = document.getElementById("lattice");
+  if (!canvas) return;
+  var ctx = canvas.getContext("2d", { alpha: false, desynchronized: true });
 
-  let W, H, dpr;
-  let frame;
+  var viewportW = 1;
+  var viewportH = 1;
+  var dpr = 1;
+  var pitchX = 10;
+  var pitchY = 12;
+  var greenRadius = 0;
+  var diamondRadius = 0;
+  var subpixels = [];
 
-  // Lattice config
-  const PITCH_X = 12;
-  const PITCH_Y = 14;
-  const GREEN_RADIUS = 2.5;
-  const DIAMOND_RADIUS = 2.8;
+  var mouse = { x: -1, y: -1 };
 
-  function resize() {
+  function rebuild() {
     dpr = Math.min(window.devicePixelRatio || 1, 2);
-    W = window.innerWidth;
-    H = window.innerHeight;
-    canvas.width = W * dpr;
-    canvas.height = H * dpr;
-    canvas.style.width = W + 'px';
-    canvas.style.height = H + 'px';
+    viewportW = Math.max(1, Math.floor(window.innerWidth));
+    viewportH = Math.max(1, Math.floor(window.innerHeight));
+
+    canvas.width = Math.floor(viewportW * dpr);
+    canvas.height = Math.floor(viewportH * dpr);
+    canvas.style.width = viewportW + "px";
+    canvas.style.height = viewportH + "px";
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.imageSmoothingEnabled = false;
+
+    var scale = Math.max(2, Math.min(12, Math.sqrt((viewportW * viewportH) / 80000)));
+    pitchX = Math.max(2, Math.round(scale));
+    pitchY = Math.max(2, Math.round(pitchX * 1.15));
+
+    var baseR = Math.min(pitchX, pitchY) * 0.5;
+    var blackMatrix = baseR * 0.12;
+    greenRadius = Math.max(0.5, baseR * 0.8 - blackMatrix);
+    diamondRadius = Math.max(0.5, baseR * 0.9 - blackMatrix);
+
+    var roughCols = Math.ceil(viewportW / pitchX) + 4;
+    var roughRows = Math.ceil(viewportH / pitchY) + 4;
+    var draft = [];
+
+    for (var row = 0; row < roughRows; row++) {
+      var rowShiftX = (row & 1) * (pitchX * 0.5);
+      for (var col = 0; col < roughCols; col++) {
+        var cx = col * pitchX + rowShiftX;
+        var cy = row * pitchY;
+        var isGreen = ((row + col) & 1) === 0;
+        var type = "G";
+        if (!isGreen) {
+          var rbPhase = (Math.floor(col / 2) + row) & 1;
+          type = rbPhase === 0 ? "R" : "B";
+        }
+        draft.push({ cx: cx, cy: cy, type: type, size: isGreen ? greenRadius : diamondRadius });
+      }
+    }
+
+    var centerX = (draft[0].cx + draft[draft.length - 1].cx) * 0.5;
+    var centerY = (draft[0].cy + draft[draft.length - 1].cy) * 0.5;
+    var offX = viewportW * 0.5 - centerX;
+    var offY = viewportH * 0.5 - centerY;
+    var edgePad = Math.max(greenRadius, diamondRadius) + 2;
+
+    subpixels = [];
+    for (var i = 0; i < draft.length; i++) {
+      var sp = draft[i];
+      var sx = sp.cx + offX;
+      var sy = sp.cy + offY;
+      if (sx < edgePad || sx > viewportW - edgePad || sy < edgePad || sy > viewportH - edgePad) continue;
+      subpixels.push({ cx: sx, cy: sy, type: sp.type, size: sp.size });
+    }
   }
 
   function draw(time) {
-    // Clear to true black
-    ctx.fillStyle = '#000000';
-    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = "#000000";
+    ctx.fillRect(0, 0, viewportW, viewportH);
 
-    const cols = Math.ceil(W / PITCH_X) + 3;
-    const rows = Math.ceil(H / PITCH_Y) + 3;
+    var t = time / 4000;
+    var pulse = 0.35 + 0.08 * Math.sin(t);
+    var mx = mouse.x;
+    var my = mouse.y;
+    var mouseR = 180;
+    var count = subpixels.length;
 
-    // Slow breathing pulse
-    const t = time / 3000;
-    const pulse = 0.45 + 0.12 * Math.sin(t);
+    for (var i = 0; i < count; i++) {
+      var s = subpixels[i];
+      var dx = s.cx - viewportW * 0.5;
+      var dy = s.cy - viewportH * 0.5;
+      var dist = Math.sqrt(dx * dx + dy * dy);
+      var maxDist = Math.sqrt(viewportW * viewportW + viewportH * viewportH) * 0.5;
+      var vignette = Math.max(0, 1 - Math.pow(dist / maxDist, 1.5));
 
-    // Mouse interaction — subtle brightness boost near cursor
-    const mx = mouse.x;
-    const my = mouse.y;
-    const mouseRadius = 200;
+      var mb = 0;
+      if (mx >= 0) {
+        var mdx = s.cx - mx;
+        var mdy = s.cy - my;
+        var mDist = Math.sqrt(mdx * mdx + mdy * mdy);
+        mb = Math.max(0, 1 - mDist / mouseR) * 0.35;
+      }
 
-    for (let row = 0; row < rows; row++) {
-      const rowShiftX = (row & 1) * (PITCH_X * 0.5);
+      var brightness = pulse * vignette + mb;
+      if (brightness < 0.015) continue;
 
-      for (let col = 0; col < cols; col++) {
-        const cx = col * PITCH_X + rowShiftX;
-        const cy = row * PITCH_Y;
+      if (s.type === "G") {
+        var g = Math.round(180 * brightness);
+        ctx.fillStyle = "rgba(0," + g + ",0," + (brightness * 0.65).toFixed(3) + ")";
+        ctx.beginPath();
+        ctx.arc(s.cx, s.cy, s.size + brightness * 0.4, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        var rb = (Math.floor(i / 2)) & 1;
+        var sz = s.size * (0.85 + brightness * 0.2);
+        var r = 0, b = 0;
+        if (s.type === "R") r = Math.round(200 * brightness);
+        else b = Math.round(220 * brightness);
+        var a = brightness * 0.55;
 
-        // Vignette from edges
-        const dx = cx - W * 0.5;
-        const dy = cy - H * 0.5;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        const maxDist = Math.sqrt(W * W + H * H) * 0.5;
-        const vignette = Math.max(0, 1 - Math.pow(dist / maxDist, 1.6));
-
-        // Mouse proximity boost
-        let mouseBoost = 0;
-        if (mx >= 0 && my >= 0) {
-          const mdx = cx - mx;
-          const mdy = cy - my;
-          const mDist = Math.sqrt(mdx * mdx + mdy * mdy);
-          mouseBoost = Math.max(0, 1 - mDist / mouseRadius) * 0.3;
-        }
-
-        const brightness = pulse * vignette + mouseBoost;
-        if (brightness < 0.02) continue;
-
-        const isGreen = ((row + col) & 1) === 0;
-
-        if (isGreen) {
-          const g = Math.round(200 * brightness);
-          const a = brightness * 0.7;
-          ctx.fillStyle = `rgba(0,${g},0,${a.toFixed(3)})`;
-          ctx.beginPath();
-          ctx.arc(cx, cy, GREEN_RADIUS + brightness * 0.5, 0, Math.PI * 2);
-          ctx.fill();
-        } else {
-          const rbPhase = (Math.floor(col / 2) + row) & 1;
-          const size = DIAMOND_RADIUS * (0.8 + brightness * 0.3);
-
-          let r = 0, b = 0;
-          if (rbPhase === 0) {
-            r = Math.round(220 * brightness);
-          } else {
-            b = Math.round(240 * brightness);
-          }
-          const a = brightness * 0.6;
-
-          ctx.fillStyle = `rgba(${r},0,${b},${a.toFixed(3)})`;
-          ctx.beginPath();
-          ctx.moveTo(cx, cy - size);
-          ctx.lineTo(cx + size, cy);
-          ctx.lineTo(cx, cy + size);
-          ctx.lineTo(cx - size, cy);
-          ctx.closePath();
-          ctx.fill();
-        }
+        ctx.fillStyle = "rgba(" + r + ",0," + b + "," + a.toFixed(3) + ")";
+        ctx.beginPath();
+        ctx.moveTo(s.cx, s.cy - sz);
+        ctx.lineTo(s.cx + sz, s.cy);
+        ctx.lineTo(s.cx, s.cy + sz);
+        ctx.lineTo(s.cx - sz, s.cy);
+        ctx.closePath();
+        ctx.fill();
       }
     }
   }
 
-  // Mouse tracking for interactive brightness
-  const mouse = { x: -1, y: -1 };
-  document.addEventListener('mousemove', (e) => {
+  function frame(time) {
+    draw(time);
+    requestAnimationFrame(frame);
+  }
+
+  document.addEventListener("mousemove", function (e) {
     mouse.x = e.clientX;
     mouse.y = e.clientY;
   });
-  document.addEventListener('mouseleave', () => {
+  document.addEventListener("mouseleave", function () {
     mouse.x = -1;
     mouse.y = -1;
   });
 
-  function animate(time) {
-    draw(time);
-    frame = requestAnimationFrame(animate);
-  }
-
-  window.addEventListener('resize', resize);
-  resize();
-  animate(0);
+  window.addEventListener("resize", rebuild);
+  rebuild();
+  requestAnimationFrame(frame);
 })();
