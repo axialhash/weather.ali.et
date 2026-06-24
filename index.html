@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>weather.ali.et</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@200;300;400;500;600&family=JetBrains+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@200;300;400;500;600&family=JetBrains+Mono:wght@300;400&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
   <link rel="stylesheet" href="style.css">
 </head>
@@ -13,6 +13,7 @@
   <canvas id="lattice"></canvas>
 
   <div class="app">
+    <!-- Split view: outdoors vs server room -->
     <section class="split glass">
       <div class="panel panel--outdoor">
         <div class="panel-header">
@@ -119,6 +120,5 @@
 
   <script src="lattice.js"></script>
   <script src="app.js"></script>
-  <script src="liquid-glass.js"></script>
 </body>
 </html>
