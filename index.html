@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>weather.ali.et</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@200;300;400;600;700&family=JetBrains+Mono:wght@300;400&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --black: #000000;
+      --white: #ffffff;
+      --dim: rgba(255,255,255,0.06);
+      --faint: rgba(255,255,255,0.12);
+      --muted: rgba(255,255,255,0.4);
+      --text: rgba(255,255,255,0.88);
+      --accent: #00ff88;
+      --accent-dim: rgba(0,255,136,0.15);
+      --glow: rgba(0,255,136,0.4);
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--black);
+      color: var(--text);
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      overflow: hidden;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* AMOLED lattice background */
+    #lattice {
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+    }
+
+    /* Content overlay */
+    .content {
+      position: relative;
+      z-index: 1;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      padding: 2rem;
+    }
+
+    /* Location tag */
+    .location {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.7rem;
+      font-weight: 300;
+      letter-spacing: 0.3em;
+      text-transform: uppercase;
+      color: var(--accent);
+      background: var(--accent-dim);
+      padding: 0.4em 1.2em;
+      border-radius: 100px;
+      border: 1px solid rgba(0,255,136,0.2);
+      margin-bottom: 2rem;
+      backdrop-filter: blur(10px);
+    }
+
+    /* Main temperature */
+    .temp-now {
+      font-size: clamp(6rem, 18vw, 14rem);
+      font-weight: 200;
+      line-height: 1;
+      letter-spacing: -0.04em;
+      position: relative;
+    }
+
+    .temp-now .unit {
+      font-size: 0.3em;
+      font-weight: 300;
+      vertical-align: super;
+      color: var(--muted);
+      margin-left: 0.1em;
+    }
+
+    /* Condition */
+    .condition {
+      font-size: 1.1rem;
+      font-weight: 300;
+      color: var(--muted);
+      margin-top: 0.5rem;
+      letter-spacing: 0.05em;
+    }
+
+    /* Details row */
+    .details {
+      display: flex;
+      gap: 3rem;
+      margin-top: 3rem;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.75rem;
+      color: var(--muted);
+    }
+
+    .detail {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.3rem;
+    }
+
+    .detail-value {
+      font-size: 1.4rem;
+      font-weight: 400;
+      color: var(--text);
+      font-family: 'Inter', sans-serif;
+    }
+
+    .detail-label {
+      font-size: 0.6rem;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: var(--faint);
+    }
+
+    /* Forecast strip */
+    .forecast {
+      display: flex;
+      gap: 0;
+      margin-top: 3rem;
+      border-top: 1px solid var(--dim);
+      padding-top: 1.5rem;
+    }
+
+    .forecast-hour {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.8rem 1.2rem;
+      min-width: 4rem;
+    }
+
+    .forecast-hour + .forecast-hour {
+      border-left: 1px solid var(--dim);
+    }
+
+    .forecast-time {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.6rem;
+      color: var(--faint);
+      letter-spacing: 0.05em;
+    }
+
+    .forecast-icon {
+      font-size: 1.2rem;
+    }
+
+    .forecast-temp {
+      font-size: 0.85rem;
+      font-weight: 400;
+    }
+
+    /* Loading state */
+    .loading {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.7rem;
+      color: var(--faint);
+      letter-spacing: 0.2em;
+    }
+
+    .loading::after {
+      content: '';
+      animation: dots 1.5s steps(4, end) infinite;
+    }
+
+    @keyframes dots {
+      0% { content: ''; }
+      25% { content: '.'; }
+      50% { content: '..'; }
+      75% { content: '...'; }
+    }
+
+    /* Subtle fade-in */
+    .content > * {
+      animation: fadeUp 0.8s ease-out both;
+    }
+    .content > *:nth-child(1) { animation-delay: 0.1s; }
+    .content > *:nth-child(2) { animation-delay: 0.2s; }
+    .content > *:nth-child(3) { animation-delay: 0.3s; }
+    .content > *:nth-child(4) { animation-delay: 0.4s; }
+    .content > *:nth-child(5) { animation-delay: 0.5s; }
+
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(12px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Timestamp */
+    .timestamp {
+      position: fixed;
+      bottom: 1.5rem;
+      right: 1.5rem;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.55rem;
+      color: var(--faint);
+      letter-spacing: 0.1em;
+      z-index: 2;
+    }
+
+    .brand {
+      position: fixed;
+      bottom: 1.5rem;
+      left: 1.5rem;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.55rem;
+      color: var(--faint);
+      letter-spacing: 0.1em;
+      z-index: 2;
+    }
+  </style>
+</head>
+<body>
+
+  <canvas id="lattice"></canvas>
+
+  <div class="content">
+    <div class="location" id="location">Addis Ababa, ET</div>
+    <div class="temp-now" id="temp-now"><span class="loading">loading</span></div>
+    <div class="condition" id="condition"></div>
+
+    <div class="details" id="details"></div>
+
+    <div class="forecast" id="forecast"></div>
+  </div>
+
+  <div class="brand">weather.ali.et</div>
+  <div class="timestamp" id="timestamp"></div>
+
+  <script>
+  /* ═══════════════════════════════════════════
+     AMOLED Diamond PenTile Lattice Background
+     ═══════════════════════════════════════════ */
+  (function initLattice() {
+    const canvas = document.getElementById('lattice');
+    const ctx = canvas.getContext('2d', { alpha: false });
+    let W, H;
+
+    function resize() {
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      W = window.innerWidth;
+      H = window.innerHeight;
+      canvas.width = W * dpr;
+      canvas.height = H * dpr;
+      canvas.style.width = W + 'px';
+      canvas.style.height = H + 'px';
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      draw();
+    }
+
+    function draw() {
+      ctx.fillStyle = '#000000';
+      ctx.fillRect(0, 0, W, H);
+
+      const pitchX = 14;
+      const pitchY = 16;
+      const cols = Math.ceil(W / pitchX) + 2;
+      const rows = Math.ceil(H / pitchY) + 2;
+      const greenR = 2.8;
+      const diamondR = 3.2;
+
+      // Time-based brightness pulse
+      const t = Date.now() / 4000;
+      const pulse = 0.3 + 0.08 * Math.sin(t);
+
+      for (let row = 0; row < rows; row++) {
+        const rowShiftX = (row & 1) * (pitchX * 0.5);
+        for (let col = 0; col < cols; col++) {
+          const cx = col * pitchX + rowShiftX;
+          const cy = row * pitchY;
+          const isGreen = ((row + col) & 1) === 0;
+
+          // Distance from center for vignette
+          const dx = cx - W * 0.5;
+          const dy = cy - H * 0.5;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          const maxDist = Math.sqrt(W * W + H * H) * 0.5;
+          const vignette = 1 - Math.pow(dist / maxDist, 1.8);
+
+          const alpha = pulse * vignette;
+
+          if (isGreen) {
+            ctx.fillStyle = `rgba(0,${Math.round(180 * alpha)},0,${(alpha * 0.6).toFixed(3)})`;
+            ctx.beginPath();
+            ctx.arc(cx, cy, greenR, 0, Math.PI * 2);
+            ctx.fill();
+          } else {
+            const rbPhase = (Math.floor(col / 2) + row) & 1;
+            const color = rbPhase === 0 ? 'r' : 'b';
+            const size = diamondR * (0.85 + 0.15 * vignette);
+
+            if (color === 'r') {
+              ctx.fillStyle = `rgba(${Math.round(200 * alpha)},0,0,${(alpha * 0.5).toFixed(3)})`;
+            } else {
+              ctx.fillStyle = `rgba(0,0,${Math.round(220 * alpha)},${(alpha * 0.5).toFixed(3)})`;
+            }
+
+            ctx.beginPath();
+            ctx.moveTo(cx, cy - size);
+            ctx.lineTo(cx + size, cy);
+            ctx.lineTo(cx, cy + size);
+            ctx.lineTo(cx - size, cy);
+            ctx.closePath();
+            ctx.fill();
+          }
+        }
+      }
+    }
+
+    window.addEventListener('resize', resize);
+    resize();
+
+    // Subtle animation loop
+    let frame;
+    function animate() {
+      draw();
+      frame = requestAnimationFrame(animate);
+    }
+    animate();
+  })();
+
+  /* ═══════════════════════════════════════════
+     Weather Data (Open-Meteo, no API key)
+     ═══════════════════════════════════════════ */
+  const LAT = 9.0192;
+  const LON = 38.7525;
+
+  const WMO_ICONS = {
+    0: '☀️', 1: '🌤️', 2: '⛅', 3: '☁️',
+    45: '🌫️', 48: '🌫️',
+    51: '🌦️', 53: '🌦️', 55: '🌧️',
+    61: '🌧️', 63: '🌧️', 65: '🌧️',
+    71: '🌨️', 73: '🌨️', 75: '❄️',
+    80: '🌦️', 81: '🌧️', 82: '⛈️',
+    95: '⛈️', 96: '⛈️', 99: '⛈️'
+  };
+
+  const WMO_DESC = {
+    0: 'Clear sky', 1: 'Mainly clear', 2: 'Partly cloudy', 3: 'Overcast',
+    45: 'Fog', 48: 'Depositing rime fog',
+    51: 'Light drizzle', 53: 'Moderate drizzle', 55: 'Dense drizzle',
+    61: 'Light rain', 63: 'Moderate rain', 65: 'Heavy rain',
+    71: 'Light snow', 73: 'Moderate snow', 75: 'Heavy snow',
+    80: 'Light showers', 81: 'Moderate showers', 82: 'Violent showers',
+    95: 'Thunderstorm', 96: 'Thunderstorm with hail', 99: 'Severe thunderstorm'
+  };
+
+  async function fetchWeather() {
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${LAT}&longitude=${LON}`
+      + `&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m`
+      + `&hourly=temperature_2m,weather_code`
+      + `&timezone=Africa%2FAddis_Ababa`
+      + `&forecast_hours=8`;
+
+    const res = await fetch(url);
+    return res.json();
+  }
+
+  function render(data) {
+    const c = data.current;
+
+    // Temperature
+    document.getElementById('temp-now').innerHTML =
+      `${Math.round(c.temperature_2m)}<span class="unit">°C</span>`;
+
+    // Condition
+    document.getElementById('condition').textContent =
+      WMO_DESC[c.weather_code] || 'Unknown';
+
+    // Details
+    document.getElementById('details').innerHTML = `
+      <div class="detail">
+        <span class="detail-value">${Math.round(c.apparent_temperature)}°</span>
+        <span class="detail-label">Feels like</span>
+      </div>
+      <div class="detail">
+        <span class="detail-value">${c.relative_humidity_2m}%</span>
+        <span class="detail-label">Humidity</span>
+      </div>
+      <div class="detail">
+        <span class="detail-value">${Math.round(c.wind_speed_10m)}</span>
+        <span class="detail-label">km/h wind</span>
+      </div>
+    `;
+
+    // Forecast
+    const now = new Date();
+    const currentHour = now.getHours();
+    let forecastHTML = '';
+
+    for (let i = 1; i <= 6; i++) {
+      const hourIdx = i;
+      const h = data.hourly.temperature_2m[hourIdx];
+      const code = data.hourly.weather_code[hourIdx];
+      const time = `${(currentHour + i) % 24}:00`;
+
+      forecastHTML += `
+        <div class="forecast-hour">
+          <span class="forecast-time">${time}</span>
+          <span class="forecast-icon">${WMO_ICONS[code] || '·'}</span>
+          <span class="forecast-temp">${Math.round(h)}°</span>
+        </div>
+      `;
+    }
+    document.getElementById('forecast').innerHTML = forecastHTML;
+
+    // Timestamp
+    const ts = new Date();
+    document.getElementById('timestamp').textContent =
+      ts.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })
+      + ' EAT';
+  }
+
+  async function update() {
+    try {
+      const data = await fetchWeather();
+      render(data);
+    } catch (e) {
+      console.error('Weather fetch failed:', e);
+    }
+  }
+
+  // Initial load + refresh every 10 minutes
+  update();
+  setInterval(update, 600000);
+  </script>
+</body>
+</html>
