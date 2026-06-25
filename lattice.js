@@ -60,7 +60,7 @@
 
   // Config
   var PITCH = isMobile ? 9 : 6;
-  var BASE_BRIGHTNESS = 10;
+  var BASE_BRIGHTNESS = 30;
   var WEATHER_MULT = 1.8;
 
   // ── Dynamic sun/moon ────────────────────────────────────────────
@@ -226,27 +226,27 @@
 
     if (sunAlt < -0.1) {
       // Night: dark blue-black
-      grad.addColorStop(0, "rgb(2,2,8)");
-      grad.addColorStop(1, "rgb(5,5,15)");
+      grad.addColorStop(0, "rgb(10,10,40)");
+      grad.addColorStop(1, "rgb(20,20,60)");
     } else if (sunAlt < 0.05) {
       // Dawn/dusk: deep blue → orange/pink horizon
       var t = (sunAlt + 0.1) / 0.15;
-      var nightR = Math.round(2 + t * 15);
-      var nightG = Math.round(2 + t * 5);
-      var nightB = Math.round(8 + t * 10);
+      var nightR = Math.round(10 + t * 30);
+      var nightG = Math.round(10 + t * 15);
+      var nightB = Math.round(30 + t * 20);
       grad.addColorStop(0, "rgb(" + nightR + "," + nightG + "," + nightB + ")");
       var cloudBoost = 1 + (cloudCover / 100) * 0.8;
-      var horizonR = Math.round(40 * cloudBoost + t * 60);
-      var horizonG = Math.round(15 * cloudBoost + t * 15);
-      var horizonB = Math.round(10 + t * 20);
+      var horizonR = Math.round(60 * cloudBoost + t * 80);
+      var horizonG = Math.round(30 * cloudBoost + t * 30);
+      var horizonB = Math.round(20 + t * 30);
       grad.addColorStop(0.7, "rgb(" + Math.min(255, horizonR) + "," + Math.min(255, horizonG) + "," + horizonB + ")");
       grad.addColorStop(1, "rgb(" + Math.min(255, Math.round(horizonR * 0.6)) + "," + Math.min(255, Math.round(horizonG * 0.5)) + "," + Math.round(horizonB * 0.4) + ")");
     } else if (sunAlt < 0.3) {
       // Early morning / late afternoon: warm blue
       var t = (sunAlt - 0.05) / 0.25;
-      var topR = Math.round(5 + t * 10);
-      var topG = Math.round(8 + t * 20);
-      var topB = Math.round(25 + t * 50);
+      var topR = Math.round(15 + t * 20);
+      var topG = Math.round(20 + t * 30);
+      var topB = Math.round(50 + t * 60);
       grad.addColorStop(0, "rgb(" + topR + "," + topG + "," + topB + ")");
       var hR = Math.round(30 + (1 - t) * 30);
       var hG = Math.round(15 + (1 - t) * 10);
@@ -255,13 +255,13 @@
     } else {
       // Day: blue sky, desaturated by clouds
       var cloudDesat = cloudCover / 100;
-      var topR = Math.round(8 + cloudDesat * 30);
-      var topG = Math.round(15 + cloudDesat * 25);
-      var topB = Math.round(50 + (1 - cloudDesat) * 40);
+      var topR = Math.round(20 + cloudDesat * 40);
+      var topG = Math.round(30 + cloudDesat * 35);
+      var topB = Math.round(80 + (1 - cloudDesat) * 50);
       grad.addColorStop(0, "rgb(" + topR + "," + topG + "," + topB + ")");
-      var midR = Math.round(5 + cloudDesat * 25);
-      var midG = Math.round(12 + cloudDesat * 20);
-      var midB = Math.round(35 + (1 - cloudDesat) * 30);
+      var midR = Math.round(15 + cloudDesat * 35);
+      var midG = Math.round(25 + cloudDesat * 30);
+      var midB = Math.round(60 + (1 - cloudDesat) * 40);
       grad.addColorStop(0.6, "rgb(" + midR + "," + midG + "," + midB + ")");
       grad.addColorStop(1, "rgb(" + Math.round(midR * 0.7) + "," + Math.round(midG * 0.7) + "," + Math.round(midB * 0.6) + ")");
     }
@@ -339,7 +339,7 @@
 
       // Sun glow
       var grad = bufCtx.createRadialGradient(sx, sy, 0, sx, sy, sunR * 4);
-      var warm = sunAlt > 0.5 ? [255, 200, 80] : [255, 140, 60];
+      var warm = sunAlt > 0.5 ? [255, 220, 120] : [255, 160, 80];
       grad.addColorStop(0, "rgba(" + warm[0] + "," + warm[1] + "," + warm[2] + "," + (sunOpacity * 0.6).toFixed(2) + ")");
       grad.addColorStop(0.5, "rgba(" + warm[0] + "," + warm[1] + "," + warm[2] + "," + (sunOpacity * 0.12).toFixed(2) + ")");
       grad.addColorStop(1, "rgba(" + warm[0] + "," + warm[1] + "," + warm[2] + ",0)");
@@ -369,8 +369,8 @@
       var moonR = 3.5;
 
       var mg = bufCtx.createRadialGradient(mx, my, 0, mx, my, moonR * 5);
-      mg.addColorStop(0, "rgba(180,200,255," + (moonInt * 0.25).toFixed(2) + ")");
-      mg.addColorStop(0.5, "rgba(180,200,255," + (moonInt * 0.05).toFixed(2) + ")");
+      mg.addColorStop(0, "rgba(180,200,255," + (moonInt * 0.5).toFixed(2) + ")");
+      mg.addColorStop(0.5, "rgba(180,200,255," + (moonInt * 0.15).toFixed(2) + ")");
       mg.addColorStop(1, "rgba(180,200,255,0)");
       bufCtx.fillStyle = mg;
       bufCtx.beginPath();
@@ -381,7 +381,7 @@
       bufCtx.beginPath();
       bufCtx.arc(mx, my, moonR, 0, 6.2832);
       bufCtx.clip();
-      bufCtx.fillStyle = "rgba(200,215,255," + (moonInt * 0.9).toFixed(2) + ")";
+      bufCtx.fillStyle = "rgba(200,215,255," + Math.min(1, moonInt * 1.5).toFixed(2) + ")";
       if (moonPhase < 0.25) {
         var litEdge = mx + moonR * (1 - moonPhase * 4);
         bufCtx.fillRect(litEdge, my - moonR, mx + moonR - litEdge, moonR * 2);
@@ -409,7 +409,7 @@
         var cy = 4 + (progress * sceneH * 0.85 + cloudDriftY * 0.5 + (c % 3) * 4) % sceneH;
         var cw = 14 + (c % 3) * 6 + (cloudCover / 100) * 8;
         var ch = 4 + (c % 2) * 2;
-        var op = 0.12 + (cloudCover / 100) * 0.4;
+        var op = 0.2 + (cloudCover / 100) * 0.5;
 
         bufCtx.fillStyle = "rgba(60,70,90," + op.toFixed(2) + ")";
         bufCtx.beginPath();
@@ -529,7 +529,7 @@
 
     if (sensor.temp != null) {
       bufCtx.font = "bold 18px monospace";
-      bufCtx.fillStyle = "rgba(242,244,248,0.9)";
+      bufCtx.fillStyle = "rgba(242,244,248,1.0)";
       var tempStr = sensor.temp.toFixed(1) + "\u00B0";
       bufCtx.fillText(tempStr, centerX, startY + 8);
 
@@ -563,7 +563,7 @@
       bufCanvas = document.createElement("canvas");
       bufCanvas.width = BUF_W;
       bufCanvas.height = BUF_H;
-      bufCtx = bufCanvas.getContext("2d");
+      bufCtx = bufCanvas.getContext("2d", { willReadFrequently: true });
     }
 
     manageParticles();
@@ -614,7 +614,7 @@
       }
 
       var brightness = (cr + cg + cb) / 255;
-      if (brightness < 0.02) continue;
+      if (brightness < 0.003) continue;
 
       var alpha = Math.min(1, brightness * WEATHER_MULT + BASE_BRIGHTNESS / 255);
 
