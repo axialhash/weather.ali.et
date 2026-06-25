@@ -14,6 +14,9 @@
  *  - Thunderstorm = rain + periodic lightning flash
  *  - Fog = white haze overlay scaling with condition
  *  - Wind drift scales with wind_speed
+ *  - Clouds move in wind direction (meteorological degrees)
+ *  - Sky gradients: night/dawn/dusk/day based on sun altitude
+ *  - Crepuscular sun rays through cloud gaps
  */
 
 (function () {
@@ -174,19 +177,22 @@
 
     // Rain: scale count with precipitation amount
     if (isRaining || isStorm) {
-      // Base: 20 particles for drizzle, up to 80 for heavy rain
       var rainTarget = Math.round(20 + precip * 15);
       if (isStorm) rainTarget = Math.max(rainTarget, 60);
       rainTarget = Math.min(rainTarget, 100);
 
-      while (raindrops.length < rainTarget) {
+      while (raindrops.length < rainTarget * 3) {
         raindrops.push(
           Math.random() * BUF_W,
           Math.random() * BUF_H * 0.6,
           0.3 + Math.random() * 0.7
         );
       }
-      while (raindrops.length > rainTarget * 1.5) raindrops.pop();
+      while (raindrops.length > rainTarget * 3) {
+        raindrops.pop();
+        raindrops.pop();
+        raindrops.pop();
+      }
     } else {
       raindrops.length = 0;
     }
@@ -196,17 +202,110 @@
       var snowTarget = Math.round(15 + precip * 10);
       snowTarget = Math.min(snowTarget, 60);
 
-      while (snowflakes.length < snowTarget) {
+      while (snowflakes.length < snowTarget * 3) {
         snowflakes.push(
           Math.random() * BUF_W,
           Math.random() * BUF_H * 0.6,
           0.2 + Math.random() * 0.4
         );
       }
-      while (snowflakes.length > snowTarget * 1.5) snowflakes.pop();
+      while (snowflakes.length > snowTarget * 3) {
+        snowflakes.pop();
+        snowflakes.pop();
+        snowflakes.pop();
+      }
     } else {
       snowflakes.length = 0;
     }
+  }
+
+  // ── Sky gradient based on sun altitude ───────────────────────────
+
+  function drawSky(sceneH, sunAlt, cloudCover) {
+    var grad = bufCtx.createLinearGradient(0, 0, 0, sceneH);
+
+    if (sunAlt < -0.1) {
+      // Night: dark blue-black
+      grad.addColorStop(0, "rgb(2,2,8)");
+      grad.addColorStop(1, "rgb(5,5,15)");
+    } else if (sunAlt < 0.05) {
+      // Dawn/dusk: deep blue → orange/pink horizon
+      var t = (sunAlt + 0.1) / 0.15;
+      var nightR = Math.round(2 + t * 15);
+      var nightG = Math.round(2 + t * 5);
+      var nightB = Math.round(8 + t * 10);
+      grad.addColorStop(0, "rgb(" + nightR + "," + nightG + "," + nightB + ")");
+      var cloudBoost = 1 + (cloudCover / 100) * 0.8;
+      var horizonR = Math.round(40 * cloudBoost + t * 60);
+      var horizonG = Math.round(15 * cloudBoost + t * 15);
+      var horizonB = Math.round(10 + t * 20);
+      grad.addColorStop(0.7, "rgb(" + Math.min(255, horizonR) + "," + Math.min(255, horizonG) + "," + horizonB + ")");
+      grad.addColorStop(1, "rgb(" + Math.min(255, Math.round(horizonR * 0.6)) + "," + Math.min(255, Math.round(horizonG * 0.5)) + "," + Math.round(horizonB * 0.4) + ")");
+    } else if (sunAlt < 0.3) {
+      // Early morning / late afternoon: warm blue
+      var t = (sunAlt - 0.05) / 0.25;
+      var topR = Math.round(5 + t * 10);
+      var topG = Math.round(8 + t * 20);
+      var topB = Math.round(25 + t * 50);
+      grad.addColorStop(0, "rgb(" + topR + "," + topG + "," + topB + ")");
+      var hR = Math.round(30 + (1 - t) * 30);
+      var hG = Math.round(15 + (1 - t) * 10);
+      grad.addColorStop(0.8, "rgb(" + hR + "," + hG + ",20)");
+      grad.addColorStop(1, "rgb(" + Math.round(hR * 0.5) + "," + Math.round(hG * 0.4) + ",10)");
+    } else {
+      // Day: blue sky, desaturated by clouds
+      var cloudDesat = cloudCover / 100;
+      var topR = Math.round(8 + cloudDesat * 30);
+      var topG = Math.round(15 + cloudDesat * 25);
+      var topB = Math.round(50 + (1 - cloudDesat) * 40);
+      grad.addColorStop(0, "rgb(" + topR + "," + topG + "," + topB + ")");
+      var midR = Math.round(5 + cloudDesat * 25);
+      var midG = Math.round(12 + cloudDesat * 20);
+      var midB = Math.round(35 + (1 - cloudDesat) * 30);
+      grad.addColorStop(0.6, "rgb(" + midR + "," + midG + "," + midB + ")");
+      grad.addColorStop(1, "rgb(" + Math.round(midR * 0.7) + "," + Math.round(midG * 0.7) + "," + Math.round(midB * 0.6) + ")");
+    }
+
+    bufCtx.fillStyle = grad;
+    bufCtx.fillRect(0, 0, BUF_W, sceneH);
+  }
+
+  // ── Crepuscular sun rays through clouds ──────────────────────────
+
+  function drawSunRays(sx, sy, sceneH, sunAlt, cloudCover, windDx) {
+    var numRays = 3 + Math.floor(sunAlt * 4);
+    var rayLength = sceneH * (0.4 + sunAlt * 0.3);
+    var rayWidth = 1.5 + sunAlt * 2;
+    var baseAlpha = 0.04 + sunAlt * 0.06;
+    var cloudFactor = Math.min(1, cloudCover / 50) * Math.max(0, 1 - cloudCover / 120);
+    var alpha = baseAlpha * cloudFactor;
+
+    if (alpha < 0.005) return;
+
+    bufCtx.save();
+    for (var i = 0; i < numRays; i++) {
+      var angle = -Math.PI / 2 + (i - numRays / 2) * 0.12 + Math.sin(Date.now() / 3000 + i) * 0.03;
+      var len = rayLength * (0.7 + Math.sin(i * 1.7) * 0.3);
+      var w = rayWidth * (0.8 + Math.sin(i * 2.3) * 0.2);
+
+      var ex = sx + Math.cos(angle) * len;
+      var ey = sy + Math.sin(angle) * len;
+
+      var rayGrad = bufCtx.createLinearGradient(sx, sy, ex, ey);
+      rayGrad.addColorStop(0, "rgba(255,220,120," + (alpha * 1.5).toFixed(3) + ")");
+      rayGrad.addColorStop(0.3, "rgba(255,200,100," + alpha.toFixed(3) + ")");
+      rayGrad.addColorStop(1, "rgba(255,180,80,0)");
+
+      bufCtx.beginPath();
+      bufCtx.moveTo(sx - w * 0.3, sy);
+      bufCtx.lineTo(ex - w, ey);
+      bufCtx.lineTo(ex + w, ey);
+      bufCtx.lineTo(sx + w * 0.3, sy);
+      bufCtx.closePath();
+      bufCtx.fillStyle = rayGrad;
+      bufCtx.fill();
+    }
+    bufCtx.restore();
   }
 
   // ── Draw weather scene (upper 60% of buffer) ────────────────────
@@ -222,8 +321,6 @@
     var sceneH = BUF_H * 0.6;
 
     // Wind drift: speed + direction
-    // Meteorological degrees: 0=N, 90=E, 180=S, 270=W
-    // Clouds move IN the direction wind blows (not from)
     var windRad = (windDir * Math.PI) / 180;
     var windMag = (wind / 10) * 0.4;
     var windDx = Math.sin(windRad) * windMag;
@@ -231,7 +328,6 @@
     var rainAngle = Math.min(wind / 30, 0.8);
 
     // ── Sky gradient ──
-    // Based on sun altitude: night → dawn → day → dusk → night
     drawSky(sceneH, sunAlt, cloudCover);
 
     // ── Sun ──
@@ -303,7 +399,6 @@
     }
 
     // ── Clouds ──
-    // Density: at 100% cover, clouds fill the entire sky
     var numClouds = Math.min(14, Math.ceil(cloudCover / 7));
     if (numClouds > 0) {
       cloudDriftX += windDx * 0.04;
@@ -423,98 +518,6 @@
     }
   }
 
-  // ── Sky gradient based on sun altitude ───────────────────────────
-
-  function drawSky(sceneH, sunAlt, cloudCover) {
-    var grad = bufCtx.createLinearGradient(0, 0, 0, sceneH);
-
-    if (sunAlt < -0.1) {
-      // Night: dark blue-black
-      grad.addColorStop(0, "rgb(2,2,8)");
-      grad.addColorStop(1, "rgb(5,5,15)");
-    } else if (sunAlt < 0.05) {
-      // Dawn/dusk: deep blue → orange/pink horizon
-      var t = (sunAlt + 0.1) / 0.15;
-      var nightR = Math.round(2 + t * 15);
-      var nightG = Math.round(2 + t * 5);
-      var nightB = Math.round(8 + t * 10);
-      grad.addColorStop(0, "rgb(" + nightR + "," + nightG + "," + nightB + ")");
-      // Horizon: warm orange/pink, intensified by clouds
-      var cloudBoost = 1 + (cloudCover / 100) * 0.8;
-      var horizonR = Math.round(40 * cloudBoost + t * 60);
-      var horizonG = Math.round(15 * cloudBoost + t * 15);
-      var horizonB = Math.round(10 + t * 20);
-      grad.addColorStop(0.7, "rgb(" + Math.min(255, horizonR) + "," + Math.min(255, horizonG) + "," + horizonB + ")");
-      grad.addColorStop(1, "rgb(" + Math.min(255, Math.round(horizonR * 0.6)) + "," + Math.min(255, Math.round(horizonG * 0.5)) + "," + Math.round(horizonB * 0.4) + ")");
-    } else if (sunAlt < 0.3) {
-      // Early morning / late afternoon: warm blue
-      var t = (sunAlt - 0.05) / 0.25;
-      var topR = Math.round(5 + t * 10);
-      var topG = Math.round(8 + t * 20);
-      var topB = Math.round(25 + t * 50);
-      grad.addColorStop(0, "rgb(" + topR + "," + topG + "," + topB + ")");
-      // Warm horizon
-      var hR = Math.round(30 + (1 - t) * 30);
-      var hG = Math.round(15 + (1 - t) * 10);
-      grad.addColorStop(0.8, "rgb(" + hR + "," + hG + ",20)");
-      grad.addColorStop(1, "rgb(" + Math.round(hR * 0.5) + "," + Math.round(hG * 0.4) + ",10)");
-    } else {
-      // Day: blue sky, desaturated by clouds
-      var cloudDesat = cloudCover / 100;
-      var topR = Math.round(8 + cloudDesat * 30);
-      var topG = Math.round(15 + cloudDesat * 25);
-      var topB = Math.round(50 + (1 - cloudDesat) * 40);
-      grad.addColorStop(0, "rgb(" + topR + "," + topG + "," + topB + ")");
-      var midR = Math.round(5 + cloudDesat * 25);
-      var midG = Math.round(12 + cloudDesat * 20);
-      var midB = Math.round(35 + (1 - cloudDesat) * 30);
-      grad.addColorStop(0.6, "rgb(" + midR + "," + midG + "," + midB + ")");
-      grad.addColorStop(1, "rgb(" + Math.round(midR * 0.7) + "," + Math.round(midG * 0.7) + "," + Math.round(midB * 0.6) + ")");
-    }
-
-    bufCtx.fillStyle = grad;
-    bufCtx.fillRect(0, 0, BUF_W, sceneH);
-  }
-
-  // ── Crepuscular sun rays through clouds ──────────────────────────
-
-  function drawSunRays(sx, sy, sceneH, sunAlt, cloudCover, windDx) {
-    var numRays = 3 + Math.floor(sunAlt * 4);
-    var rayLength = sceneH * (0.4 + sunAlt * 0.3);
-    var rayWidth = 1.5 + sunAlt * 2;
-    var baseAlpha = 0.04 + sunAlt * 0.06;
-    // Rays more visible with some clouds (gaps for light to pass through)
-    var cloudFactor = Math.min(1, cloudCover / 50) * Math.max(0, 1 - cloudCover / 120);
-    var alpha = baseAlpha * cloudFactor;
-
-    if (alpha < 0.005) return;
-
-    bufCtx.save();
-    for (var i = 0; i < numRays; i++) {
-      var angle = -Math.PI / 2 + (i - numRays / 2) * 0.12 + Math.sin(Date.now() / 3000 + i) * 0.03;
-      var len = rayLength * (0.7 + Math.sin(i * 1.7) * 0.3);
-      var w = rayWidth * (0.8 + Math.sin(i * 2.3) * 0.2);
-
-      var ex = sx + Math.cos(angle) * len;
-      var ey = sy + Math.sin(angle) * len;
-
-      var rayGrad = bufCtx.createLinearGradient(sx, sy, ex, ey);
-      rayGrad.addColorStop(0, "rgba(255,220,120," + (alpha * 1.5).toFixed(3) + ")");
-      rayGrad.addColorStop(0.3, "rgba(255,200,100," + alpha.toFixed(3) + ")");
-      rayGrad.addColorStop(1, "rgba(255,180,80,0)");
-
-      bufCtx.beginPath();
-      bufCtx.moveTo(sx - w * 0.3, sy);
-      bufCtx.lineTo(ex - w, ey);
-      bufCtx.lineTo(ex + w, ey);
-      bufCtx.lineTo(sx + w * 0.3, sy);
-      bufCtx.closePath();
-      bufCtx.fillStyle = rayGrad;
-      bufCtx.fill();
-    }
-    bufCtx.restore();
-  }
-
   // ── Draw sensor values (lower 40% of buffer) ────────────────────
 
   function drawSensorValues() {
@@ -591,3 +594,77 @@
 
       var bx = Math.min(BUF_W - 1, Math.max(0, Math.round(normX * (BUF_W - 1))));
       var by = Math.min(BUF_H - 1, Math.max(0, Math.round(normY * (BUF_H - 1))));
+
+      var pi = (by * BUF_W + bx) * 4;
+      var r = buf[pi];
+      var g = buf[pi + 1];
+      var b = buf[pi + 2];
+
+      // Apply subpixel color filtering (Diamond PenTile: green is circular, R/B are diamonds)
+      var cr, cg, cb;
+      if (type === 0) {
+        // Green subpixel
+        cr = 0; cg = g; cb = 0;
+      } else if (type === 1) {
+        // Red subpixel
+        cr = r; cg = 0; cb = 0;
+      } else {
+        // Blue subpixel
+        cr = 0; cg = 0; cb = b;
+      }
+
+      var brightness = (cr + cg + cb) / 255;
+      if (brightness < 0.02) continue;
+
+      var alpha = Math.min(1, brightness * WEATHER_MULT + BASE_BRIGHTNESS / 255);
+
+      if (type === 0) {
+        // Green: circle
+        ctx.fillStyle = "rgba(" + cr + "," + cg + "," + cb + "," + alpha.toFixed(2) + ")";
+        ctx.beginPath();
+        ctx.arc(x, y, radius, 0, 6.2832);
+        ctx.fill();
+      } else {
+        // Red/Blue: diamond (rotated square)
+        ctx.fillStyle = "rgba(" + cr + "," + cg + "," + cb + "," + alpha.toFixed(2) + ")";
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(Math.PI / 4);
+        ctx.fillRect(-radius * 0.7, -radius * 0.7, radius * 1.4, radius * 1.4);
+        ctx.restore();
+      }
+    }
+  }
+
+  // ── Animation loop ──────────────────────────────────────────────
+
+  var running = true;
+  function loop(time) {
+    if (!running) return;
+    draw(time);
+    requestAnimationFrame(loop);
+  }
+
+  // ── Resize ──────────────────────────────────────────────────────
+
+  var resizeTimer;
+  window.addEventListener("resize", function () {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(function () {
+      rebuild();
+    }, 100);
+  });
+
+  // ── Init ────────────────────────────────────────────────────────
+
+  rebuild();
+  requestAnimationFrame(loop);
+
+  // ── API bridge for app.js ───────────────────────────────────────
+
+  window.__lattice = {
+    updateSensor: updateSensor,
+    updateWeather: updateWeather,
+  };
+
+})();
